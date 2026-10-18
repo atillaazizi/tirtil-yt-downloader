@@ -1,0 +1,16 @@
+node_modules/
+package-lock.json
+__pycache__/
+*.py[cod]
+build/
+dist/
+*.spec
+.venv/
+venv/
+ffmpeg/
+*.log
+settings.json
+*.tmp
+.DS_Store
+.idea/
+.vscode/

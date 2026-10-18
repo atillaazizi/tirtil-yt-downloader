@@ -1,0 +1,55 @@
+{
+  "name": "ati-youtube-batch-slicer-studio",
+  "productName": "ATi__ Slicer Studio",
+  "version": "1.0.0",
+  "description": "ATi__ : YouTube Audio & Video Batch Slicer Studio (macOS)",
+  "main": "electron/main.js",
+  "scripts": {
+    "start": "electron .",
+    "build:engine": "./scripts/build_engine.sh",
+    "build": "npm run build:engine && electron-builder --mac",
+    "build:dir": "npm run build:engine && electron-builder --mac --dir"
+  },
+  "keywords": [
+    "youtube-downloader",
+    "audio-slicer",
+    "yt-dlp-gui",
+    "electron",
+    "macos",
+    "auto-split",
+    "ffmpeg"
+  ],
+  "author": "ATi__ (atillaazizi)",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.atillaazizi.ati-slicer-studio",
+    "productName": "ATi__ Slicer Studio",
+    "afterPack": "scripts/adhoc-sign.js",
+    "copyright": "MIT — ATi__, based on dotu-yt by rtrw_",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "electron/**",
+      "ui/**",
+      "package.json"
+    ],
+    "extraResources": [
+      { "from": "build/engine/ati-engine", "to": "engine" }
+    ],
+    "mac": {
+      "category": "public.app-category.music",
+      "icon": "assets/icon.icns",
+      "target": [{ "target": "dmg", "arch": ["arm64"] }],
+      "identity": null,
+      "darkModeSupport": true
+    },
+    "dmg": {
+      "title": "ATi__ Slicer Studio"
+    }
+  }
+}
