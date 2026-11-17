@@ -5,10 +5,26 @@ const { app, dialog, shell, net } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const crypto = require('crypto');
 const { spawn } = require('child_process');
 
 const REPO = 'atillaazizi/tirtil-yt-downloader';
 const API_LATEST = `https://api.github.com/repos/${REPO}/releases/latest`;
+
+// Sürümler bu anahtarın özel çiftiyle imzalanır (scripts/sign_release.js).
+// İmzası doğrulanmayan hiçbir DMG kurulmaz.
+const UPDATE_PUBLIC_KEY = `-----BEGIN PUBLIC KEY-----
+MCowBQYDK2VwAyEA9A5xLeprBtgGTEP7QBF8Nmv0uuUdwDmWGjzV65uZ6GU=
+-----END PUBLIC KEY-----`;
+
+function verifySignature(filePath, sigB64) {
+  try {
+    const sig = Buffer.from(String(sigB64).trim(), 'base64');
+    return crypto.verify(null, fs.readFileSync(filePath), crypto.createPublicKey(UPDATE_PUBLIC_KEY), sig);
+  } catch (_) {
+    return false;
+  }
+}
 
 function parseVersion(v) {
   return String(v || '').replace(/^v/i, '').split(/[.-]/).slice(0, 3).map(n => parseInt(n, 10) || 0);
@@ -29,14 +45,15 @@ async function fetchLatest() {
   });
   if (!res.ok) throw new Error(`GitHub yanıtı: ${res.status}`);
   const rel = await res.json();
-  const arch = process.arch; // arm64 | x64
-  const dmgs = (rel.assets || []).filter(a => a.name.toLowerCase().endsWith('.dmg'));
-  const asset = dmgs.find(a => a.name.includes(arch)) || dmgs[0];
+  const version = String(rel.tag_name || '').replace(/^v/i, '');
+  const name = `Tirtil-${version}-${process.arch}.dmg`;
+  const assets = rel.assets || [];
   return {
-    version: String(rel.tag_name || '').replace(/^v/i, ''),
+    version,
     notes: (rel.body || '').trim(),
     pageUrl: rel.html_url,
-    asset
+    asset: assets.find(a => a.name === name),
+    sigAsset: assets.find(a => a.name === `${name}.sig`)
   };
 }
 
@@ -84,7 +101,7 @@ while kill -0 "$PID" 2>/dev/null; do sleep 0.5; done
 MNT="$(mktemp -d /tmp/tirtil-update.XXXXXX)"
 if ! hdiutil attach -nobrowse -noautoopen -mountpoint "$MNT" "$DMG"; then open "$DMG"; exit 1; fi
 SRC="$(find "$MNT" -maxdepth 1 -name '*.app' | head -n 1)"
-if [ -n "$SRC" ]; then
+if [ -n "$SRC" ] && codesign --verify --deep --strict "$SRC"; then
   rm -rf "$TARGET.old"
   if mv "$TARGET" "$TARGET.old" && ditto "$SRC" "$TARGET"; then
     rm -rf "$TARGET.old"
@@ -161,7 +178,7 @@ async function checkForUpdates({ getWindow, notify, loadSettings, saveSettings, 
     }
     if (response !== 0) return;
 
-    if (!latest.asset) {
+    if (!latest.asset || !latest.sigAsset) {
       shell.openExternal(latest.pageUrl);
       return;
     }
@@ -175,6 +192,13 @@ async function checkForUpdates({ getWindow, notify, loadSettings, saveSettings, 
     });
     const w = getWindow();
     if (w && !w.isDestroyed()) w.setProgressBar(-1);
+
+    const sigRes = await net.fetch(latest.sigAsset.browser_download_url, { headers: { 'User-Agent': 'Tirtil-Updater' } });
+    const sig = sigRes.ok ? await sigRes.text() : '';
+    if (!verifySignature(dest, sig)) {
+      try { fs.unlinkSync(dest); } catch (_) {}
+      throw new Error('Güncelleme dosyasının imzası doğrulanamadı; kurulmadı.');
+    }
     notify({ state: 'ready', version: latest.version });
 
     const { response: r2 } = await dialog.showMessageBox(getWindow(), {

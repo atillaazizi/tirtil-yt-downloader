@@ -27,9 +27,12 @@ Yeni sürüm varsa sorar; onaylanınca DMG'yi indirir, uygulamayı kapatıp yeni
 
 1. `package.json` içindeki `version` değerini artır (ör. `1.2.1`).
 2. `npm run build` → `dist/Tirtil-<sürüm>-arm64.dmg`
-3. `gh release create v<sürüm> dist/Tirtil-<sürüm>-arm64.dmg --title "Tırtıl v<sürüm>" --notes "..."`
+3. `node scripts/sign_release.js dist/Tirtil-<sürüm>-arm64.dmg` → `.sig` dosyası
+4. `gh release create v<sürüm> dist/Tirtil-<sürüm>-arm64.dmg dist/Tirtil-<sürüm>-arm64.dmg.sig --title "Tırtıl v<sürüm>" --notes "..."`
 
 Etiket `v` + `package.json` sürümüyle aynı olmalı; uygulamalar bu sürümü görüp güncelleme önerir.
+Uygulama yalnızca `~/.config/tirtil/update-signing-key.pem` ile imzalanmış DMG'leri kurar — bu anahtarı yedekle,
+kaybolursa mevcut kullanıcılara otomatik güncelleme gönderilemez.
 
 ## Geliştirme
 
