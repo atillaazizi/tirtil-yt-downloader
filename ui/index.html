@@ -2,236 +2,110 @@
 <html lang="tr">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; script-src 'self'">
-  <title>ATi__ : YouTube Audio &amp; Video Batch Slicer Studio</title>
-  <link rel="stylesheet" href="styles/globals.css">
-  <link rel="stylesheet" href="styles/app.css">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'">
+  <title>Tırtıl YT Downloader</title>
+  <link rel="stylesheet" href="app.css">
 </head>
 <body>
-  <div class="window-frame" id="app-window-frame">
-    <!-- TITLEBAR (macOS native traffic lights solda) -->
-    <header class="titlebar">
-      <div class="titlebar-left">
-        <div class="brand-pill-badge">
-          <span class="brand-pill-dot"></span>
-          <span class="brand-pill-text">ATi__</span>
-        </div>
-        <div class="app-title-group">
-          <span class="app-main-title">⚡ Slicer Studio</span>
-          <span class="app-version-tag" id="app-version">v1.0.0</span>
+  <header class="titlebar">
+    <span class="title">Tırtıl YT Downloader</span>
+    <span class="version" id="app-version"></span>
+    <button class="update-pill" id="update-pill" hidden></button>
+    <button class="link-btn" id="btn-open-log" title="Log klasörünü aç">Loglar</button>
+  </header>
+
+  <main>
+    <section class="card">
+      <div class="row between">
+        <h2>Linkler <span class="badge" id="url-counter">0</span></h2>
+        <div class="row">
+          <button class="btn" id="btn-paste-clip">Yapıştır</button>
+          <button class="btn" id="btn-import-txt">.txt Aç</button>
+          <button class="btn" id="btn-clear-urls">Temizle</button>
         </div>
       </div>
+      <textarea id="url-input" spellcheck="false"
+        placeholder="YouTube linklerini yapıştır (her satıra bir link)&#10;https://www.youtube.com/watch?v=...&#10;https://youtu.be/..."></textarea>
+      <div class="row between folder">
+        <span class="path" id="folder-path-display">…</span>
+        <div class="row">
+          <button class="btn" id="btn-pick-folder">Klasör Seç</button>
+          <button class="btn" id="btn-open-folder">Finder'da Aç</button>
+        </div>
+      </div>
+    </section>
 
-      <div class="titlebar-center">
-        <span>YouTube Audio &amp; Video Batch Slicer Studio</span>
+    <section class="card">
+      <div class="segmented" id="format-pill-group">
+        <button data-format="mp3" class="active">MP3</button>
+        <button data-format="m4a">M4A</button>
+        <button data-format="wav">WAV</button>
+        <button data-format="flac">FLAC</button>
+        <button data-format="mp4">MP4 Video</button>
+      </div>
+      <div class="row wrap">
+        <label class="field" id="bitrate-control-section">Kalite
+          <select id="select-bitrate">
+            <option value="320">320 kbps</option>
+            <option value="256">256 kbps</option>
+            <option value="192">192 kbps</option>
+            <option value="128">128 kbps</option>
+          </select>
+        </label>
+        <label class="check" title="YouTube bölümlerine, yoksa sessizliklere göre parçalara böler">
+          <input type="checkbox" id="check-split"> Parçalara böl (albüm / derleme)
+        </label>
       </div>
 
-      <div class="titlebar-right">
-        <span class="live-clock" id="live-clock">--:--:--</span>
-      </div>
-    </header>
-
-    <div class="workstation-container">
-      <div class="workstation-scroll">
-
-        <!-- 1. HERO -->
-        <div class="hero-banner">
-          <div class="hero-left">
-            <h1>
-              <span>ATi__ Studio</span>
-              <span class="hero-tag-pill" lang="en">macOS Edition</span>
-            </h1>
-            <p>YouTube'dan stüdyo kalitesinde ses &amp; video — toplu, hızlı, parça parça_</p>
-          </div>
-          <div class="hero-right">
-            <button class="btn-portal-pill" id="btn-open-log" title="Log klasörünü aç">
-              <span>📜 Loglar</span>
-            </button>
-          </div>
+      <details>
+        <summary>Gelişmiş</summary>
+        <div class="row wrap">
+          <label class="field">Eşzamanlı
+            <select id="select-workers">
+              <option value="1">1</option>
+              <option value="2">2</option>
+              <option value="3" selected>3</option>
+              <option value="4">4</option>
+            </select>
+          </label>
+          <label class="field">Tarayıcı cookie
+            <select id="select-cookie-browser">
+              <option value="none" selected>Kullanma</option>
+              <option value="auto">Otomatik bul</option>
+              <option value="chrome">Chrome</option>
+              <option value="safari">Safari</option>
+              <option value="firefox">Firefox</option>
+              <option value="brave">Brave</option>
+              <option value="edge">Edge</option>
+            </select>
+          </label>
+          <label class="field">Bekleme
+            <select id="select-delay-mode">
+              <option value="safe" selected>2–4 sn</option>
+              <option value="super_safe">4–7 sn</option>
+              <option value="fast">1–2 sn</option>
+              <option value="none">Yok</option>
+            </select>
+          </label>
         </div>
+        <p class="hint">Normalde cookie gerekmez. YouTube "bot" engeli verirse, giriş yapılmış tarayıcıyı seç. Chrome/Brave/Edge için macOS Anahtar Zinciri izni sorarsa "İzin Ver" seç.</p>
+      </details>
+    </section>
 
-        <!-- 2. LINK KUYRUĞU -->
-        <div class="studio-card">
-          <div class="card-header-row">
-            <div class="card-title-group">
-              <h2>📋 YouTube Link Kuyruğu</h2>
-              <span class="card-counter-badge" id="url-counter">0 Link</span>
-            </div>
-            <div class="card-actions-group">
-              <button class="btn-util-pill btn-emerald" id="btn-paste-clip">
-                <span>📋 Panodan Yapıştır</span>
-              </button>
-              <button class="btn-util-pill" id="btn-import-txt">
-                <span>📁 .txt İçe Aktar</span>
-              </button>
-              <button class="btn-util-pill btn-danger" id="btn-clear-urls">
-                <span>🗑️ Temizle</span>
-              </button>
-            </div>
-          </div>
-
-          <textarea
-            id="url-input"
-            class="url-textarea"
-            placeholder="YouTube linklerini buraya yapıştır (her satıra bir link)...&#10;Örnek:&#10;https://www.youtube.com/watch?v=xxxx&#10;https://youtu.be/yyyy"
-            spellcheck="false"
-          ></textarea>
-
-          <!-- 3. ÇIKTI KLASÖRÜ -->
-          <div class="folder-bar">
-            <div class="folder-path-display">
-              <span>📁 Kaydet:</span>
-              <span class="folder-path-text" id="folder-path-display">Klasör yükleniyor...</span>
-            </div>
-            <div class="folder-buttons">
-              <button class="btn-util-pill" id="btn-pick-folder">Klasör Seç</button>
-              <button class="btn-util-pill" id="btn-open-folder">📂 Finder'da Aç</button>
-            </div>
-          </div>
-        </div>
-
-        <!-- 4. AYARLAR -->
-        <div class="settings-grid">
-
-          <div class="studio-card">
-            <div class="control-section">
-              <span class="section-label">Format:</span>
-              <div class="format-pill-group" id="format-pill-group">
-                <button class="format-pill-btn active" data-format="mp3">MP3 Audio</button>
-                <button class="format-pill-btn" data-format="wav">WAV Lossless</button>
-                <button class="format-pill-btn" data-format="flac">FLAC Studio</button>
-                <button class="format-pill-btn" data-format="m4a">M4A Apple</button>
-                <button class="format-pill-btn" data-format="mp4">MP4 Video</button>
-              </div>
-            </div>
-
-            <div class="row-controls">
-              <div class="control-section" id="bitrate-control-section">
-                <span class="section-label">Kalite:</span>
-                <select id="select-bitrate" class="custom-select">
-                  <option value="320">320 kbps (En Yüksek)</option>
-                  <option value="256">256 kbps (Yüksek)</option>
-                  <option value="192">192 kbps (Standart)</option>
-                  <option value="128">128 kbps (Ekonomik)</option>
-                </select>
-              </div>
-
-              <div class="control-section">
-                <span class="section-label">Paralel:</span>
-                <select id="select-workers" class="custom-select">
-                  <option value="1">1 Link</option>
-                  <option value="2">2 Eşzamanlı</option>
-                  <option value="3" selected>3 Eşzamanlı</option>
-                  <option value="4">4 Eşzamanlı</option>
-                  <option value="5">5 Eşzamanlı</option>
-                  <option value="6">6 Eşzamanlı</option>
-                </select>
-              </div>
-
-              <div class="control-section" style="margin-top: 18px;">
-                <label class="custom-checkbox-label">
-                  <input type="checkbox" id="check-split">
-                  <span>✂️ Auto-Split (Parçalara Böl)</span>
-                </label>
-              </div>
-            </div>
-          </div>
-
-          <div class="shield-card">
-            <div class="shield-header">
-              <div class="shield-title">
-                <span>🛡️</span>
-                <span>Engel Koruması</span>
-              </div>
-              <button class="btn-util-pill" id="btn-clear-cache" title="yt-dlp token önbelleğini temizle">
-                <span>🧹 Önbelleği Temizle</span>
-              </button>
-            </div>
-
-            <div class="shield-row">
-              <div class="shield-item">
-                <span>Tarayıcı Cookie:</span>
-                <select id="select-cookie-browser" class="custom-select">
-                  <option value="auto" selected>⚡ Otomatik (Önerilen)</option>
-                  <option value="chrome">Google Chrome</option>
-                  <option value="safari">Safari</option>
-                  <option value="firefox">Firefox</option>
-                  <option value="brave">Brave</option>
-                  <option value="edge">Microsoft Edge</option>
-                  <option value="vivaldi">Vivaldi</option>
-                  <option value="opera">Opera</option>
-                  <option value="none">Yok (Cookie'siz)</option>
-                </select>
-              </div>
-
-              <div class="shield-item">
-                <span>Rastgele Bekleme:</span>
-                <select id="select-delay-mode" class="custom-select">
-                  <option value="safe" selected>2 - 4s (Güvenli)</option>
-                  <option value="super_safe">4 - 7s (Çok Güvenli)</option>
-                  <option value="fast">1 - 2s (Hızlı)</option>
-                  <option value="none">0s (Beklemesiz)</option>
-                </select>
-              </div>
-            </div>
-            <p style="font-size: 11px; color: #888888;">
-              🛡️ Otomatik mod; Chrome, Brave, Edge, Vivaldi, Opera ve Firefox'ta YouTube oturumunu arar. Chromium tarayıcılarında macOS Anahtar Zinciri izni sorulabilir.
-            </p>
-          </div>
-
-        </div>
-
-        <!-- 5. ANA BUTON -->
-        <div class="cta-row">
-          <button class="btn-master-action" id="btn-start-download">
-            <span>⚡ ŞİMDİ İNDİR</span>
-          </button>
-          <button class="btn-cancel-action" id="btn-cancel-download" disabled>
-            <span>🛑 İptal</span>
-          </button>
-        </div>
-
-        <!-- 6. İLERLEME -->
-        <div class="progress-card">
-          <div class="progress-header">
-            <span class="progress-status-text" id="progress-status">Hazır_</span>
-            <span class="progress-metrics" id="progress-metrics">0% • 0/0 tamamlandı</span>
-          </div>
-          <div class="progress-bar-track">
-            <div class="progress-bar-fill" id="progress-bar-fill"></div>
-          </div>
-        </div>
-
-        <!-- 7. LOG TERMİNALİ -->
-        <div class="terminal-card">
-          <div class="terminal-header">
-            <span>Konsol Logu</span>
-            <button class="btn-util-pill" id="btn-clear-terminal" style="padding: 2px 10px; font-size: 10px;">Logu Temizle</button>
-          </div>
-          <div class="terminal-screen" id="terminal-screen">
-            <div class="terminal-line level-info">[SYSTEM] ATi__ Slicer Studio hazır.</div>
-          </div>
-        </div>
-
-      </div>
-
-      <!-- 8. ALT BİLGİ -->
-      <footer class="status-footer">
-        <div class="footer-left">
-          <span>⚡ ATi__ Slicer Studio</span>
-          <span>•</span>
-          <span>Kullanıcı: <span class="footer-user-badge" id="footer-user">Guest</span></span>
-          <span>•</span>
-          <span>macOS</span>
-        </div>
-        <div class="footer-right">
-          <span>yt-dlp + FFmpeg • based on dotu-yt (MIT)</span>
-        </div>
-      </footer>
-
+    <div class="row actions">
+      <button class="btn primary" id="btn-start-download">İndir</button>
+      <button class="btn" id="btn-cancel-download" disabled>İptal</button>
     </div>
-  </div>
+
+    <section class="card">
+      <div class="row between small">
+        <span id="progress-status">Hazır</span>
+        <span id="progress-metrics"></span>
+      </div>
+      <div class="track"><div class="fill" id="progress-bar-fill"></div></div>
+      <div class="log" id="terminal-screen"></div>
+    </section>
+  </main>
 
   <script src="renderer.js"></script>
 </body>

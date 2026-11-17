@@ -2,20 +2,27 @@ const { app, BrowserWindow, ipcMain, dialog, shell, Menu } = require('electron')
 const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
+const { checkForUpdates } = require('./updater');
 
-const APP_NAME = 'ATi__ : YouTube Audio & Video Batch Slicer Studio';
-app.setName('ATi__ Slicer Studio');
+const APP_NAME = 'Tırtıl YT Downloader';
+app.setName('Tırtıl');
 
 let mainWindow = null;
 let currentEngineProcess = null;
 
-// macOS: ~/Library/Application Support/ATi__ Slicer Studio
+// macOS: ~/Library/Application Support/Tırtıl
 const APP_DATA_DIR = app.getPath('userData');
 if (!fs.existsSync(APP_DATA_DIR)) {
   fs.mkdirSync(APP_DATA_DIR, { recursive: true });
 }
 const SETTINGS_FILE = path.join(APP_DATA_DIR, 'settings.json');
-const LOG_DIR = path.join(app.getPath('home'), 'Library', 'Logs', 'ATi__ Slicer Studio');
+
+// Eski adla (ATi__ Slicer Studio) kaydedilmiş ayarları bir kereliğine taşı.
+const LEGACY_SETTINGS = path.join(app.getPath('appData'), 'ATi__ Slicer Studio', 'settings.json');
+if (!fs.existsSync(SETTINGS_FILE) && fs.existsSync(LEGACY_SETTINGS)) {
+  try { fs.copyFileSync(LEGACY_SETTINGS, SETTINGS_FILE); } catch (_) { /* yoksay */ }
+}
+const LOG_DIR = path.join(app.getPath('home'), 'Library', 'Logs', 'Tırtıl');
 fs.mkdirSync(LOG_DIR, { recursive: true });
 
 const PROJECT_ROOT = path.resolve(__dirname, '..');
@@ -26,9 +33,12 @@ function buildEngineEnv() {
   const current = (process.env.PATH || '').split(':').filter(Boolean);
   const merged = [...new Set([...current, ...extra])];
   const env = { ...process.env, PATH: merged.join(':'), PYTHONUNBUFFERED: '1', PYTHONIOENCODING: 'utf-8', ATI_LOG_DIR: LOG_DIR };
-  if (app.isPackaged) {
-    env.ATI_FFMPEG_DIR = path.join(process.resourcesPath, 'ffmpeg');
-  }
+  const res = app.isPackaged ? process.resourcesPath : PROJECT_ROOT;
+  env.ATI_ELECTRON_EXEC = process.execPath;
+  env.ATI_NODE_BIN = path.join(res, 'bin', 'node');
+  env.ATI_FFMPEG_DIR = app.isPackaged
+    ? path.join(res, 'ffmpeg')
+    : path.dirname(require('ffmpeg-static'));
   return env;
 }
 
@@ -74,10 +84,10 @@ function getEngineCommand(extraArgs) {
 function createMainWindow() {
   mainWindow = new BrowserWindow({
     title: APP_NAME,
-    width: 1220,
-    height: 880,
-    minWidth: 1040,
-    minHeight: 700,
+    width: 920,
+    height: 820,
+    minWidth: 760,
+    minHeight: 640,
     center: true,
     titleBarStyle: 'hiddenInset',
     trafficLightPosition: { x: 18, y: 17 },
@@ -95,14 +105,6 @@ function createMainWindow() {
 
   mainWindow.loadFile(path.join(PROJECT_ROOT, 'ui', 'index.html'));
 
-  mainWindow.on('enter-full-screen', () => {
-    if (mainWindow) mainWindow.webContents.send('window-state-changed', { isFullScreen: true });
-  });
-
-  mainWindow.on('leave-full-screen', () => {
-    if (mainWindow) mainWindow.webContents.send('window-state-changed', { isFullScreen: false });
-  });
-
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
     mainWindow.focus();
@@ -116,7 +118,21 @@ function createMainWindow() {
 // Standart macOS menüsü: Cmd+C/V/X/A, Cmd+R, Cmd+Q bunsuz textarea'da çalışmaz.
 function buildMenu() {
   const template = [
-    { role: 'appMenu' },
+    {
+      label: app.name,
+      submenu: [
+        { role: 'about', label: 'Tırtıl Hakkında' },
+        { label: 'Güncellemeleri Denetle…', click: () => runUpdateCheck(true) },
+        { type: 'separator' },
+        { role: 'services' },
+        { type: 'separator' },
+        { role: 'hide' },
+        { role: 'hideOthers' },
+        { role: 'unhide' },
+        { type: 'separator' },
+        { role: 'quit' }
+      ]
+    },
     { role: 'editMenu' },
     {
       label: 'Görünüm',
@@ -138,15 +154,13 @@ function buildMenu() {
 
 ipcMain.handle('get-initial-state', () => {
   const settings = loadSettings();
-  const defaultDownloadFolder = path.join(app.getPath('downloads'), 'ATi_Downloads');
+  const defaultDownloadFolder = path.join(app.getPath('downloads'), 'Tırtıl_Downloads');
   if (!settings.download_folder) {
     settings.download_folder = defaultDownloadFolder;
   }
   return {
     settings,
-    currentUser: settings.remember_user || require('os').userInfo().username,
     defaultDownloadFolder,
-    platform: process.platform,
     version: app.getVersion()
   };
 });
@@ -200,23 +214,6 @@ ipcMain.handle('open-folder', (_e, targetPath) => {
 ipcMain.handle('open-logs', () => {
   shell.openPath(LOG_DIR);
   return true;
-});
-
-ipcMain.handle('open-external-url', (_e, url) => {
-  if (url && /^https?:\/\//.test(url)) {
-    shell.openExternal(url);
-    return true;
-  }
-  return false;
-});
-
-ipcMain.handle('clear-cache', async () => {
-  const { cmd, args } = getEngineCommand(['--clear-cache']);
-  return new Promise((resolve) => {
-    const proc = spawn(cmd, args, { env: buildEngineEnv() });
-    proc.on('error', () => resolve(false));
-    proc.on('close', (code) => resolve(code === 0));
-  });
 });
 
 ipcMain.handle('start-download', async (_e, config) => {
@@ -298,9 +295,25 @@ ipcMain.handle('cancel-download', () => {
   return { success: false };
 });
 
+function runUpdateCheck(manual) {
+  return checkForUpdates({
+    getWindow: () => mainWindow,
+    notify: (status) => {
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('update-status', status);
+    },
+    loadSettings,
+    saveSettings,
+    manual
+  });
+}
+
+ipcMain.handle('check-updates', () => runUpdateCheck(true));
+
 app.whenReady().then(() => {
   buildMenu();
   createMainWindow();
+  // Paketli sürümde açılıştan kısa süre sonra sessizce denetle.
+  if (app.isPackaged) setTimeout(() => runUpdateCheck(false), 4000);
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createMainWindow();

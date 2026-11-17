@@ -1,33 +1,24 @@
 {
-  "name": "ati-youtube-batch-slicer-studio",
-  "productName": "ATi__ Slicer Studio",
-  "version": "1.0.0",
-  "description": "ATi__ : YouTube Audio & Video Batch Slicer Studio (macOS)",
+  "name": "tirtil-yt-downloader",
+  "productName": "Tırtıl",
+  "version": "1.2.0",
+  "description": "Tırtıl YT Downloader — YouTube toplu ses/video indirici (macOS)",
   "main": "electron/main.js",
   "scripts": {
     "start": "electron .",
     "build:engine": "./scripts/build_engine.sh",
-    "build": "npm run build:engine && electron-builder --mac",
-    "build:dir": "npm run build:engine && electron-builder --mac --dir"
+    "build": "npm run build:engine && electron-builder --mac"
   },
-  "keywords": [
-    "youtube-downloader",
-    "audio-slicer",
-    "yt-dlp-gui",
-    "electron",
-    "macos",
-    "auto-split",
-    "ffmpeg"
-  ],
   "author": "ATi__ (atillaazizi)",
   "license": "MIT",
   "devDependencies": {
-    "electron": "^33.0.0",
-    "electron-builder": "^25.1.8"
+    "electron": "^45.3.3",
+    "electron-builder": "^26.18.0",
+    "ffmpeg-static": "^5.3.0"
   },
   "build": {
-    "appId": "com.atillaazizi.ati-slicer-studio",
-    "productName": "ATi__ Slicer Studio",
+    "appId": "com.atillaazizi.tirtil",
+    "productName": "Tırtıl",
     "afterPack": "scripts/adhoc-sign.js",
     "copyright": "MIT — ATi__, based on dotu-yt by rtrw_",
     "directories": {
@@ -39,17 +30,47 @@
       "package.json"
     ],
     "extraResources": [
-      { "from": "build/engine/ati-engine", "to": "engine" }
+      {
+        "from": "build/engine/ati-engine",
+        "to": "engine"
+      },
+      {
+        "from": "node_modules/ffmpeg-static/ffmpeg",
+        "to": "ffmpeg/ffmpeg"
+      },
+      {
+        "from": "bin/node",
+        "to": "bin/node"
+      }
     ],
     "mac": {
       "category": "public.app-category.music",
       "icon": "assets/icon.icns",
-      "target": [{ "target": "dmg", "arch": ["arm64"] }],
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ],
       "identity": null,
-      "darkModeSupport": true
+      "darkModeSupport": true,
+      "minimumSystemVersion": "12.0"
     },
     "dmg": {
-      "title": "ATi__ Slicer Studio"
-    }
+      "title": "Tırtıl",
+      "writeUpdateInfo": false,
+      "artifactName": "Tirtil-${version}-${arch}.${ext}"
+    },
+    "electronLanguages": [
+      "en",
+      "tr"
+    ],
+    "publish": null
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/atillaazizi/tirtil-yt-downloader.git"
   }
 }

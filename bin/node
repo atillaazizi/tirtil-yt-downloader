@@ -1,0 +1,3 @@
+#!/bin/sh
+# Electron'un gömülü Node'unu yt-dlp için "node" gibi çalıştırır (ayrı kurulum gerekmez).
+ELECTRON_RUN_AS_NODE=1 exec "$ATI_ELECTRON_EXEC" "$@"

@@ -1,53 +1,45 @@
-# ⚡ ATi__ : YouTube Audio & Video Batch Slicer Studio
+# Tırtıl YT Downloader
 
-macOS için toplu YouTube ses/video indirici ve parça bölücü. Electron arayüzü + Python (yt-dlp, FFmpeg) motoru.
+macOS için toplu YouTube ses/video indirici. Link listesini yapıştır, formatı seç, indir.
+İstersen albüm/derleme videolarını parçalara böler (YouTube bölümleri, yoksa sessizlik algılama).
 
 > [rtrw_/dotu-yt](https://github.com/rtrwcloud/dotu-yt) (MIT) projesinin macOS portu.
 
-## Özellikler
+## Kullanım (hazır uygulama)
 
-- **Toplu kuyruk**: onlarca linki yapıştır veya `.txt` dosyasından içe aktar.
-- **Formatlar**: MP3 (128–320 kbps), WAV, FLAC, M4A, MP4 video.
-- **Auto-Split**: YouTube bölümlerine (chapter) göre, bölüm yoksa FFmpeg sessizlik algılama ile derleme/albüm videolarını ayrı parçalara böler (`01 - Başlık.mp3`, title/album/track etiketli).
-- **Paralel indirme**: 1–6 eşzamanlı.
-- **Tarayıcı cookie'leri**: Chrome, Brave, Edge, Vivaldi, Opera, Firefox profillerinde YouTube oturumunu otomatik bulur; Safari elle seçilebilir. Cookie okunamazsa cookie'siz moda otomatik geçer.
-- **Rastgele bekleme** ve 429/403 için kademeli yeniden deneme.
+1. `Tirtil-x.y.z-arm64.dmg` ([Releases](https://github.com/atillaazizi/tirtil-yt-downloader/releases/latest)) dosyasını aç, uygulamayı **Applications** klasörüne sürükle.
+2. İlk açılışta macOS "geliştirici doğrulanamadı" uyarısı verir (uygulama Apple imzalı değil):
+   - **Sistem Ayarları → Gizlilik ve Güvenlik** → en altta **"Yine de Aç"**, ya da
+   - Terminal'de: `xattr -dr com.apple.quarantine "/Applications/Tırtıl.app"`
+3. Linkleri yapıştır → format seç → **İndir**. Dosyalar `İndirilenler/Tırtıl_Downloads` klasörüne iner.
 
-## macOS'a özel değişiklikler
+Ek kurulum gerekmez: FFmpeg, Python motoru ve Node uygulamanın içinde. Apple Silicon (M1 ve sonrası), macOS 12+.
 
-| Orijinal (Windows) | Bu port (macOS) |
-|---|---|
-| Çerçevesiz pencere + özel butonlar | Native trafik ışıkları (`hiddenInset`), tam ekran desteği, standart menü (Cmd+C/V/Q/R) |
-| `C:\ProgramData\RTRW_DoTu` | `~/Library/Application Support/ATi__ Slicer Studio` |
-| Proje klasörüne log | `~/Library/Logs/ATi__ Slicer Studio/ati_latest.log` |
-| `%LOCALAPPDATA%` tarayıcı yolları | `~/Library/Application Support/...` + Firefox + Safari |
-| `ffmpeg.exe`, `node.exe` | Homebrew (`/opt/homebrew/bin`), Finder'dan açılışta PATH düzeltmesi |
-| `.bat` scriptleri, PyInstaller GUI | `scripts/setup.sh`, `start.command`, electron-builder ile `.app` + `.dmg` (engine PyInstaller ile gömülü) |
-| Bölmede kayıplı/kayıpsız fark yok | WAV/FLAC/M4A için doğru encoder, kayıpsızda bitrate yok |
+**Not:** YouTube "bot" engeli verirse *Gelişmiş → Tarayıcı cookie* ile YouTube'a giriş yapılmış tarayıcıyı seç.
+Chrome/Brave/Edge'de macOS Anahtar Zinciri izin sorar — "İzin Ver". Safari için Tam Disk Erişimi gerekir.
 
-## Kurulum (geliştirme)
+## Güncellemeler
 
-Gereken: [Homebrew](https://brew.sh)
+Uygulama açılışta GitHub'daki son sürümü denetler (menü: **Tırtıl → Güncellemeleri Denetle…**).
+Yeni sürüm varsa sorar; onaylanınca DMG'yi indirir, uygulamayı kapatıp yenisini yerine kurar ve yeniden açar.
 
-```bash
-./scripts/setup.sh      # ffmpeg, node, python@3.12, .venv, npm install
-./start.command         # veya: npm start
-```
+## Yeni sürüm yayınlama
 
-## Uygulama paketi (.app / .dmg)
+1. `package.json` içindeki `version` değerini artır (ör. `1.2.1`).
+2. `npm run build` → `dist/Tirtil-<sürüm>-arm64.dmg`
+3. `gh release create v<sürüm> dist/Tirtil-<sürüm>-arm64.dmg --title "Tırtıl v<sürüm>" --notes "..."`
+
+Etiket `v` + `package.json` sürümüyle aynı olmalı; uygulamalar bu sürümü görüp güncelleme önerir.
+
+## Geliştirme
 
 ```bash
-npm run build           # dist/ATi__ Slicer Studio-1.0.0-arm64.dmg
+./scripts/setup.sh   # python venv + npm install
+npm start            # geliştirme modu
+npm run build        # dist/*.dmg
 ```
 
-Paket Python motorunu içerir; yine de **FFmpeg** sistemde olmalı (`brew install ffmpeg`), **node** önerilir (YouTube JS imza çözümü için).
-Uygulama ad-hoc imzalıdır; ilk açılışta Gatekeeper uyarırsa: sağ tık → **Aç** (veya `xattr -dr com.apple.quarantine "/Applications/ATi__ Slicer Studio.app"`).
-
-## Notlar
-
-- Chromium tarayıcı cookie'leri okunurken macOS **Anahtar Zinciri** izni sorar ("Chrome Safe Storage") — "İzin Ver" seç.
-- Safari cookie'leri için uygulamaya **Tam Disk Erişimi** gerekir.
-- İkon: `scripts/make_icon.py`.
+YouTube değiştikçe yt-dlp güncellenmeli: `./scripts/setup.sh && npm run build`.
 
 ## Lisans
 

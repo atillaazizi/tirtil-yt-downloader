@@ -1,5 +1,5 @@
 """
-ATi__ Engine Worker - YouTube Audio & Video Batch Slicer Studio (macOS)
+Tırtıl Engine Worker - Tırtıl YT Downloader (macOS)
 Electron UI'ya satır satır JSON olay akışı gönderir.
 Fork: dotu-yt by rtrw_ (MIT)
 """
@@ -12,12 +12,37 @@ import glob
 import time
 import random
 import shutil
+import traceback
 import sqlite3
 import tempfile
 import subprocess
 import threading
 import concurrent.futures
-import yt_dlp
+import platform
+
+
+def _patch_mac_ver():
+    """Bazı Mac'lerde platform.mac_ver() boş sürüm döndürür; paketli yt-dlp bunu int()'e
+    çevirirken "invalid literal for int() with base 10: ''" ile çöker. sw_vers'e düş."""
+    original = platform.mac_ver
+
+    def safe_mac_ver(*args, **kwargs):
+        release, versioninfo, machine = original(*args, **kwargs)
+        if not re.fullmatch(r"\d+(\.\d+)*", release or ""):
+            try:
+                out = subprocess.run(["/usr/bin/sw_vers", "-productVersion"],
+                                     capture_output=True, text=True, timeout=5).stdout.strip()
+            except Exception:
+                out = ""
+            release = out if re.fullmatch(r"\d+(\.\d+)*", out) else "14.0"
+        return release, versioninfo, machine
+
+    platform.mac_ver = safe_mac_ver
+
+
+_patch_mac_ver()
+
+import yt_dlp  # noqa: E402  (mac_ver yamasından sonra yüklenmeli)
 
 if sys.stdout.encoding != 'utf-8':
     try:
@@ -40,7 +65,7 @@ def send_event(event_type, **kwargs):
         pass
 
 
-LOG_DIR = os.environ.get("ATI_LOG_DIR") or os.path.join(HOME, "Library", "Logs", "ATi__ Slicer Studio")
+LOG_DIR = os.environ.get("ATI_LOG_DIR") or os.path.join(HOME, "Library", "Logs", "Tırtıl")
 os.makedirs(LOG_DIR, exist_ok=True)
 LOG_FILE = os.path.join(LOG_DIR, "ati_latest.log")
 _log_lock = threading.Lock()
@@ -181,11 +206,11 @@ def get_ffmpeg_bin():
     return _find_tool("ffmpeg") or "ffmpeg"
 
 
-def get_ffprobe_bin():
-    return _find_tool("ffprobe") or "ffprobe"
-
-
 def get_node_bin():
+    # Paketli uygulamada Electron'un kendi Node'u (ATI_NODE_BIN shim) — kurulum gerektirmez.
+    shim = os.environ.get("ATI_NODE_BIN")
+    if shim and os.path.isfile(shim):
+        return "node", shim
     for name in ("deno", "node"):
         p = _find_tool(name)
         if p:
@@ -200,12 +225,14 @@ def sanitize_filename(name):
 
 
 def get_audio_duration(filepath):
+    """Süreyi ffprobe olmadan, ffmpeg çıktısından okur (pakette yalnız ffmpeg var)."""
     try:
-        cmd = [get_ffprobe_bin(), "-v", "quiet", "-print_format", "json", "-show_format", filepath]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-        if result.returncode == 0:
-            info = json.loads(result.stdout)
-            return float(info.get("format", {}).get("duration", 0))
+        result = subprocess.run([get_ffmpeg_bin(), "-hide_banner", "-i", filepath],
+                                capture_output=True, text=True, timeout=30)
+        m = re.search(r"Duration:\s*(\d+):(\d+):([\d.]+)", result.stderr)
+        if m:
+            h, mi, sec = m.groups()
+            return int(h) * 3600 + int(mi) * 60 + float(sec)
     except Exception:
         pass
     return 0
@@ -304,12 +331,12 @@ def clear_ytdlp_cache():
 class BatchDownloader:
     def __init__(self, config):
         self.urls = config.get("urls", [])
-        self.download_folder = os.path.expanduser(config.get("download_folder") or os.path.join(HOME, "Downloads", "ATi_Downloads"))
+        self.download_folder = os.path.expanduser(config.get("download_folder") or os.path.join(HOME, "Downloads", "Tırtıl_Downloads"))
         self.format_choice = config.get("format", "mp3").lower()
         self.bitrate = str(config.get("bitrate", "320"))
         self.workers = int(config.get("workers", 3))
         self.split_enabled = bool(config.get("split", False))
-        self.cookie_choice = (config.get("cookie_browser") or "auto").strip().lower()
+        self.cookie_choice = (config.get("cookie_browser") or "none").strip().lower()
         self.cookie_browser = None
         self.cookie_profile = None
         self.delay_mode = config.get("delay_mode", "safe")
@@ -456,19 +483,20 @@ class BatchDownloader:
                 return True
 
             except Exception as e:
+                write_persistent_log(traceback.format_exc())
                 err_str = str(e)
                 low = err_str.lower()
 
-                # Cookie okunamadı (Keychain reddi, kilitli DB vb.): cookie'siz moda geç, deneme hakkı yakma
-                if any(k in low for k in ("cookie", "keychain", "database", "decrypt")):
-                    if self.cookie_browser and self.cookie_browser != "none":
-                        log(f"[{idx}/{total}] Tarayıcı cookie'si okunamadı. Cookie'siz moda geçiliyor...", "warn")
-                        with self.lock:
-                            self.cookie_browser = "none"
-                            self.cookie_profile = None
-                        attempt -= 1
-                        time.sleep(0.5)
-                        continue
+                # Cookie'li denemede herhangi bir hata (Keychain reddi, bozuk/uyumsuz cookie DB, hesap
+                # oturumu sorunları vb.): cookie'siz moda geç, deneme hakkı yakma
+                if self.cookie_browser and self.cookie_browser != "none":
+                    log(f"[{idx}/{total}] Tarayıcı cookie'si ile hata ({err_str[:80]}). Cookie'siz deneniyor...", "warn")
+                    with self.lock:
+                        self.cookie_browser = "none"
+                        self.cookie_profile = None
+                    attempt -= 1
+                    time.sleep(0.5)
+                    continue
 
                 if self.cancel_flag:
                     return None
@@ -548,10 +576,10 @@ class BatchDownloader:
         log(f"Engel koruması: Cookie [{self.cookie_browser}] | Bekleme [{self.delay_mode}]", "info")
         ffmpeg = _find_tool("ffmpeg")
         if not ffmpeg:
-            log("FFmpeg bulunamadı! Terminalde: brew install ffmpeg", "error")
+            log("FFmpeg bulunamadı! Uygulamayı yeniden indir veya: brew install ffmpeg", "error")
         rt_name, _ = get_node_bin()
         if not rt_name:
-            log("JS çalışma zamanı (node/deno) yok; bazı videolar başarısız olabilir. brew install node", "warn")
+            log("JS çalışma zamanı (node/deno) yok; bazı videolar başarısız olabilir.", "warn")
 
         clear_ytdlp_cache()
         log("yt-dlp iç token önbelleği otomatik temizlendi.", "info")
@@ -586,9 +614,6 @@ class BatchDownloader:
 
 
 def main():
-    if len(sys.argv) >= 2 and sys.argv[1] == "--clear-cache":
-        sys.exit(0 if clear_ytdlp_cache() else 1)
-
     try:
         if len(sys.argv) < 2:
             config = json.loads(sys.stdin.read())
