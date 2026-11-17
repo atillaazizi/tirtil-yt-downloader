@@ -98,8 +98,13 @@ CHROMIUM_BROWSERS = [
 FIREFOX_PROFILES = os.path.join(APP_SUPPORT, "Firefox", "Profiles")
 
 
+# macOS izni yüzünden cookie'si okunamayan tarayıcılar (kullanıcıya Tam Disk Erişimi önermek için)
+COOKIE_BLOCKED = []
+
+
 def _count_yt_cookies(db_path, query):
-    """Kilitli olabilecek DB'yi geçici kopyadan okuyup YouTube cookie sayısını döndürür."""
+    """Kilitli olabilecek DB'yi geçici kopyadan okuyup YouTube cookie sayısını döndürür.
+    Okunamıyorsa (macOS izni vb.) None döner."""
     fd, temp_db = tempfile.mkstemp(prefix="ati_ck_probe_", suffix=".db")
     os.close(fd)
     try:
@@ -110,8 +115,7 @@ def _count_yt_cookies(db_path, query):
         finally:
             conn.close()
     except Exception:
-        # Okunamıyorsa (izin vb.) yt-dlp'ye denesin diye pozitif say
-        return 1
+        return None
     finally:
         try:
             os.remove(temp_db)
@@ -129,17 +133,37 @@ def _chromium_profiles(base_dir, browser):
 
 
 def _probe_chromium(browser, base_dir):
+    """YouTube cookie'si olan profiller arasından en son kullanılanı seçer."""
     if not os.path.isdir(base_dir):
         return None
+    best = None  # (mtime, prof)
+    blocked = False
     for prof in _chromium_profiles(base_dir, browser):
         prof_dir = os.path.join(base_dir, prof) if prof else base_dir
         for cookie_file in (os.path.join(prof_dir, "Network", "Cookies"), os.path.join(prof_dir, "Cookies")):
             if not os.path.isfile(cookie_file):
                 continue
+            try:
+                # yt-dlp profili klasörü listeleyerek arar; listelenemiyorsa o da bulamaz
+                os.listdir(prof_dir)
+            except OSError:
+                blocked = True
+                break
             cnt = _count_yt_cookies(cookie_file, "SELECT count(*) FROM cookies WHERE host_key LIKE '%youtube%'")
+            if cnt is None:
+                blocked = True
+                break
             if cnt > 0:
-                desc = browser.capitalize() + (f" ({prof})" if prof else "")
-                return (browser, prof or None, f"Cookie otomatik bulundu: {desc} aktif oturum ✅")
+                mtime = os.path.getmtime(cookie_file)
+                if best is None or mtime > best[0]:
+                    best = (mtime, prof)
+            break
+    if best:
+        prof = best[1]
+        desc = browser.capitalize() + (f" ({prof})" if prof else "")
+        return (browser, prof or None, f"Cookie otomatik bulundu: {desc} aktif oturum ✅")
+    if blocked and browser not in COOKIE_BLOCKED:
+        COOKIE_BLOCKED.append(browser)
     return None
 
 
@@ -151,6 +175,10 @@ def _probe_firefox():
         if not os.path.isfile(cookie_file):
             continue
         cnt = _count_yt_cookies(cookie_file, "SELECT count(*) FROM moz_cookies WHERE host LIKE '%youtube%'")
+        if cnt is None:
+            if "firefox" not in COOKIE_BLOCKED:
+                COOKIE_BLOCKED.append("firefox")
+            continue
         if cnt > 0:
             return ("firefox", prof_dir, f"Cookie otomatik bulundu: Firefox ({os.path.basename(prof_dir)}) aktif oturum ✅")
     return None
@@ -173,7 +201,11 @@ def find_best_browser_cookies(preferred="auto"):
     if pref != "auto":
         for b_name, base_dir in CHROMIUM_BROWSERS:
             if b_name == pref:
-                return _probe_chromium(b_name, base_dir) or (pref, None, f"{pref.capitalize()} cookie'leri deneniyor")
+                found = _probe_chromium(b_name, base_dir)
+                if found:
+                    return found
+                # İzin yüzünden okunamıyorsa boşuna denemeyip cookie'siz devam et
+                return None if pref in COOKIE_BLOCKED else (pref, None, f"{pref.capitalize()} cookie'leri deneniyor")
         return (pref, None, f"{pref} cookie'leri deneniyor")
 
     for b_name, base_dir in CHROMIUM_BROWSERS:
@@ -349,6 +381,10 @@ class BatchDownloader:
         os.makedirs(self.download_folder, exist_ok=True)
 
         best_cookie = find_best_browser_cookies(self.cookie_choice)
+        if COOKIE_BLOCKED:
+            names = ", ".join(b.capitalize() for b in COOKIE_BLOCKED)
+            log(f"{names} cookie'leri okunamadı: macOS izni gerekiyor (Tam Disk Erişimi → Tırtıl).", "warn")
+            send_event("cookie_permission", browsers=COOKIE_BLOCKED)
         if best_cookie:
             self.cookie_browser, self.cookie_profile, info_msg = best_cookie
             log(info_msg, "success")
@@ -491,6 +527,8 @@ class BatchDownloader:
                 # oturumu sorunları vb.): cookie'siz moda geç, deneme hakkı yakma
                 if self.cookie_browser and self.cookie_browser != "none":
                     log(f"[{idx}/{total}] Tarayıcı cookie'si ile hata ({err_str[:80]}). Cookie'siz deneniyor...", "warn")
+                    if "cookies database" in low or "not permitted" in low or "permission" in low:
+                        send_event("cookie_permission", browsers=[self.cookie_browser])
                     with self.lock:
                         self.cookie_browser = "none"
                         self.cookie_profile = None

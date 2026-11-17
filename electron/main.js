@@ -229,6 +229,27 @@ ipcMain.handle('open-logs', () => {
   return true;
 });
 
+// Tarayıcı cookie'leri macOS izni yüzünden okunamıyorsa oturum başına bir kez yol göster.
+let cookiePromptShown = false;
+async function promptCookiePermission(browsers) {
+  if (cookiePromptShown || !mainWindow || mainWindow.isDestroyed()) return;
+  cookiePromptShown = true;
+  const names = (Array.isArray(browsers) ? browsers : []).map(b => String(b).charAt(0).toUpperCase() + String(b).slice(1)).join(', ') || 'Tarayıcı';
+  const { response } = await dialog.showMessageBox(mainWindow, {
+    type: 'warning',
+    buttons: ['Ayarları Aç', 'Şimdi Değil'],
+    defaultId: 0,
+    cancelId: 1,
+    message: `${names} cookie'leri okunamıyor`,
+    detail: 'macOS, Tırtıl\'ın tarayıcı verilerini okumasına izin vermiyor. İndirmeler cookie\'siz devam eder; '
+      + 'YouTube "bot" engeli verirse izin gerekir.\n\n'
+      + 'Sistem Ayarları → Gizlilik ve Güvenlik → Tam Disk Erişimi → Tırtıl\'ı aç, sonra uygulamayı yeniden başlat.'
+  });
+  if (response === 0) {
+    shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles');
+  }
+}
+
 ipcMain.handle('start-download', async (_e, config) => {
   if (currentEngineProcess) {
     return { error: 'İndirme zaten çalışıyor.' };
@@ -265,11 +286,15 @@ ipcMain.handle('start-download', async (_e, config) => {
     for (const line of lines) {
       const trimmed = line.trim();
       if (!trimmed) continue;
+      let payload;
       try {
-        send(JSON.parse(trimmed));
+        payload = JSON.parse(trimmed);
       } catch (_) {
         send({ event: 'log', level: 'info', message: trimmed, timestamp: new Date().toLocaleTimeString('tr-TR') });
+        continue;
       }
+      send(payload);
+      if (payload.event === 'cookie_permission') promptCookiePermission(payload.browsers);
     }
   });
 
