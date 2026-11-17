@@ -5,6 +5,19 @@ macOS için toplu YouTube ses/video indirici. Link listesini yapıştır, format
 
 > [rtrw_/dotu-yt](https://github.com/rtrwcloud/dotu-yt) (MIT) projesinin macOS portu.
 
+## Kurulum
+
+**Terminalden (önerilen):**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/atillaazizi/tirtil-yt-downloader/main/install.sh | bash
+```
+
+Son sürümü indirir, SHA-256 ve kod imzasını doğrular, `/Applications`'a kurar ve açar.
+Belirli bir sürüm için: `... | bash -s -- 1.2.1`. Terminalden kurulumda macOS "geliştirici doğrulanamadı" uyarısı çıkmaz.
+
+**Elle (DMG):** aşağıdaki adımlar.
+
 ## Kullanım (hazır uygulama)
 
 1. `Tirtil-x.y.z-arm64.dmg` ([Releases](https://github.com/atillaazizi/tirtil-yt-downloader/releases/latest)) dosyasını aç, uygulamayı **Applications** klasörüne sürükle.

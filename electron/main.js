@@ -99,9 +99,14 @@ function createMainWindow() {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
       contextIsolation: true,
-      sandbox: false
+      sandbox: true
     }
   });
+
+  // Uygulama yalnızca kendi yerel sayfasını gösterir; yeni pencere ve dış gezinme yasak.
+  mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  mainWindow.webContents.on('will-navigate', (e) => e.preventDefault());
+  mainWindow.webContents.on('will-attach-webview', (e) => e.preventDefault());
 
   mainWindow.loadFile(path.join(PROJECT_ROOT, 'ui', 'index.html'));
 
@@ -205,9 +210,17 @@ ipcMain.handle('pick-txt-file', async () => {
 });
 
 ipcMain.handle('open-folder', (_e, targetPath) => {
-  if (!targetPath) return false;
-  fs.mkdirSync(targetPath, { recursive: true });
-  shell.openPath(targetPath);
+  // Yalnızca gerçek klasörler açılır; .app paketi ya da dosya çalıştırılmaz.
+  if (typeof targetPath !== 'string' || !path.isAbsolute(targetPath)) return false;
+  const resolved = path.resolve(targetPath);
+  if (/\.(app|bundle|pkg|command)$/i.test(resolved)) return false;
+  try {
+    fs.mkdirSync(resolved, { recursive: true });
+    if (!fs.statSync(resolved).isDirectory()) return false;
+  } catch (_) {
+    return false;
+  }
+  shell.openPath(resolved);
   return true;
 });
 

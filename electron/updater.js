@@ -190,7 +190,7 @@ async function checkForUpdates({ getWindow, notify, loadSettings, saveSettings, 
     if (response !== 0) return;
 
     if (!latest.asset || !latest.sigAsset) {
-      shell.openExternal(latest.pageUrl);
+      if (String(latest.pageUrl).startsWith(`https://github.com/${REPO}/`)) shell.openExternal(latest.pageUrl);
       return;
     }
 
