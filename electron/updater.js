@@ -17,10 +17,21 @@ const UPDATE_PUBLIC_KEY = `-----BEGIN PUBLIC KEY-----
 MCowBQYDK2VwAyEA9A5xLeprBtgGTEP7QBF8Nmv0uuUdwDmWGjzV65uZ6GU=
 -----END PUBLIC KEY-----`;
 
-function verifySignature(filePath, sigB64) {
+// İmzalı manifest: sürüm + mimari + DMG SHA-256. Sürüme bağlı olduğu için eski imzalı bir DMG
+// yeni sürüm etiketiyle yeniden yayınlanıp kullanıcı eski sürüme düşürülemez.
+function manifestPayload(m) {
+  return `tirtil-update:v1\n${m.version}\n${m.arch}\n${m.sha256}`;
+}
+
+function verifyUpdate(filePath, sigText, expectedVersion) {
   try {
-    const sig = Buffer.from(String(sigB64).trim(), 'base64');
-    return crypto.verify(null, fs.readFileSync(filePath), crypto.createPublicKey(UPDATE_PUBLIC_KEY), sig);
+    const m = JSON.parse(sigText);
+    const sig = Buffer.from(String(m.signature || ''), 'base64');
+    if (!crypto.verify(null, Buffer.from(manifestPayload(m)), crypto.createPublicKey(UPDATE_PUBLIC_KEY), sig)) return false;
+    if (m.version !== expectedVersion || m.arch !== process.arch) return false;
+    if (!isNewer(m.version, app.getVersion())) return false;
+    const sha = crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
+    return sha === m.sha256;
   } catch (_) {
     return false;
   }
@@ -195,7 +206,7 @@ async function checkForUpdates({ getWindow, notify, loadSettings, saveSettings, 
 
     const sigRes = await net.fetch(latest.sigAsset.browser_download_url, { headers: { 'User-Agent': 'Tirtil-Updater' } });
     const sig = sigRes.ok ? await sigRes.text() : '';
-    if (!verifySignature(dest, sig)) {
+    if (!verifyUpdate(dest, sig, latest.version)) {
       try { fs.unlinkSync(dest); } catch (_) {}
       throw new Error('Güncelleme dosyasının imzası doğrulanamadı; kurulmadı.');
     }
@@ -230,4 +241,4 @@ async function checkForUpdates({ getWindow, notify, loadSettings, saveSettings, 
   }
 }
 
-module.exports = { checkForUpdates, isNewer };
+module.exports = { checkForUpdates, isNewer, verifyUpdate };
