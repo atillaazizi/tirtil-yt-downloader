@@ -383,8 +383,8 @@ class BatchDownloader:
         best_cookie = find_best_browser_cookies(self.cookie_choice)
         if COOKIE_BLOCKED:
             names = ", ".join(b.capitalize() for b in COOKIE_BLOCKED)
-            log(f"{names} cookie'leri okunamadı: macOS izni gerekiyor (Tam Disk Erişimi → Tırtıl).", "warn")
-            send_event("cookie_permission", browsers=COOKIE_BLOCKED)
+            # Sadece bilgi: izin istemi yalnızca YouTube bot engeli gelirse gösterilir
+            log(f"{names} cookie'lerine erişim yok (macOS izni). Cookie'siz devam ediliyor.", "info")
         if best_cookie:
             self.cookie_browser, self.cookie_profile, info_msg = best_cookie
             log(info_msg, "success")
@@ -527,8 +527,9 @@ class BatchDownloader:
                 # oturumu sorunları vb.): cookie'siz moda geç, deneme hakkı yakma
                 if self.cookie_browser and self.cookie_browser != "none":
                     log(f"[{idx}/{total}] Tarayıcı cookie'si ile hata ({err_str[:80]}). Cookie'siz deneniyor...", "warn")
-                    if "cookies database" in low or "not permitted" in low or "permission" in low:
-                        send_event("cookie_permission", browsers=[self.cookie_browser])
+                    if ("cookies database" in low or "not permitted" in low or "permission" in low) \
+                            and self.cookie_browser not in COOKIE_BLOCKED:
+                        COOKIE_BLOCKED.append(self.cookie_browser)
                     with self.lock:
                         self.cookie_browser = "none"
                         self.cookie_profile = None
@@ -540,6 +541,12 @@ class BatchDownloader:
                     return None
 
                 is_rate_limit = any(k in low for k in ("429", "403", "too many", "sign in", "bot", "confirm"))
+                is_bot_check = any(k in low for k in ("sign in", "not a bot", "confirm you", "age-restricted", "age restricted", "members-only"))
+
+                # Bot/oturum engeli + okunamayan tarayıcı cookie'si: izin vermek işe yarar, kullanıcıya söyle
+                if is_bot_check and COOKIE_BLOCKED and not getattr(self, "_permission_hinted", False):
+                    self._permission_hinted = True
+                    send_event("cookie_permission", browsers=COOKIE_BLOCKED)
 
                 if is_rate_limit and attempt < max_attempts:
                     cooldown = backoff_delays[attempt - 1]

@@ -229,7 +229,7 @@ ipcMain.handle('open-logs', () => {
   return true;
 });
 
-// Tarayıcı cookie'leri macOS izni yüzünden okunamıyorsa oturum başına bir kez yol göster.
+// YouTube bot engeli verdiğinde ve tarayıcı cookie'leri macOS izni yüzünden okunamıyorsa oturum başına bir kez yol göster.
 let cookiePromptShown = false;
 async function promptCookiePermission(browsers) {
   if (cookiePromptShown || !mainWindow || mainWindow.isDestroyed()) return;
@@ -240,9 +240,9 @@ async function promptCookiePermission(browsers) {
     buttons: ['Ayarları Aç', 'Şimdi Değil'],
     defaultId: 0,
     cancelId: 1,
-    message: `${names} cookie'leri okunamıyor`,
-    detail: 'macOS, Tırtıl\'ın tarayıcı verilerini okumasına izin vermiyor. İndirmeler cookie\'siz devam eder; '
-      + 'YouTube "bot" engeli verirse izin gerekir.\n\n'
+    message: 'YouTube indirmeyi engelledi',
+    detail: `YouTube "bot değilim" doğrulaması istiyor. Bunu aşmak için Tırtıl'ın ${names} oturumunuzu (cookie) kullanması gerekiyor, `
+      + 'ama macOS buna izin vermiyor.\n\n'
       + 'Sistem Ayarları → Gizlilik ve Güvenlik → Tam Disk Erişimi → Tırtıl\'ı aç, sonra uygulamayı yeniden başlat.'
   });
   if (response === 0) {
