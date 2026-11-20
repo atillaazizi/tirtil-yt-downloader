@@ -1,7 +1,7 @@
 {
   "name": "tirtil-yt-downloader",
   "productName": "Tırtıl",
-  "version": "1.2.3",
+  "version": "1.3.0",
   "description": "Tırtıl YT Downloader — YouTube toplu ses/video indirici (macOS)",
   "main": "electron/main.js",
   "scripts": {
