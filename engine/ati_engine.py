@@ -42,7 +42,42 @@ def _patch_mac_ver():
 
 _patch_mac_ver()
 
-import yt_dlp  # noqa: E402  (mac_ver yamasından sonra yüklenmeli)
+def _vtuple(v):
+    return tuple(int(x) for x in re.findall(r"\d+", str(v or "")))
+
+
+def _load_ytdlp():
+    """Uygulama yt-dlp'nin daha yeni bir sürümünü indirdiyse (ATI_YTDLP_DIR) onu, yoksa paketteki
+    sürümü yükler. Yeni sürüm açılamazsa paketteki sürüme döner."""
+    from importlib import metadata
+    try:
+        bundled = metadata.version("yt-dlp")
+    except Exception:
+        bundled = "0"
+    base = os.environ.get("ATI_YTDLP_DIR")
+    try:
+        with open(os.path.join(base, "current.txt"), encoding="utf-8") as f:
+            ver = f.read().strip()
+        zpath = os.path.join(base, f"yt-dlp-{ver}.zip")
+        if re.fullmatch(r"[\d.]+", ver) and _vtuple(ver) > _vtuple(bundled) and os.path.isfile(zpath):
+            sys.path.insert(0, zpath)
+            try:
+                import yt_dlp as mod
+                # Zip bozuksa Python sessizce paketteki sürüme düşer; gerçekten zipten mi geldi?
+                if not os.path.abspath(mod.__file__ or "").startswith(os.path.abspath(zpath) + os.sep):
+                    raise ImportError("yt-dlp zip açılamadı")
+                return mod, bundled, "güncel"
+            except Exception:
+                sys.path.remove(zpath)
+                for name in [m for m in sys.modules if m == "yt_dlp" or m.startswith("yt_dlp.")]:
+                    del sys.modules[name]
+    except Exception:
+        pass
+    import yt_dlp as mod
+    return mod, bundled, "paket"
+
+
+yt_dlp, YTDLP_BUNDLED, YTDLP_SOURCE = _load_ytdlp()  # mac_ver yamasından sonra yüklenmeli
 
 if sys.stdout.encoding != 'utf-8':
     try:
@@ -351,6 +386,75 @@ def split_audio_file(filepath, chapters, output_dir, title_prefix, codec="mp3", 
     return results
 
 
+def merge_segments(segments, duration=0):
+    """[(başlangıç, bitiş)] aralıklarını sıralar, çakışanları birleştirir."""
+    out = []
+    for a, b in sorted((float(a), float(b)) for a, b in segments):
+        if duration:
+            b = min(b, duration)
+        if b - a < 0.2:
+            continue
+        if out and a <= out[-1][1]:
+            out[-1][1] = max(out[-1][1], b)
+        else:
+            out.append([a, b])
+    return out
+
+
+def shift_chapters(chapters, cuts):
+    """Kesilen aralıklara göre bölüm zamanlarını kaydırır (parçalara bölme için)."""
+    def removed_before(t):
+        return sum(max(0.0, min(b, t) - a) for a, b in cuts if a < t)
+    out = []
+    for ch in chapters:
+        s0 = ch["start"] - removed_before(ch["start"])
+        e0 = ch["end"] - removed_before(ch["end"])
+        if e0 - s0 > 1:
+            out.append({**ch, "start": s0, "end": e0})
+    return out
+
+
+def rewrite_audio(filepath, bitrate="320", cuts=None, loudnorm=False):
+    """Tek ffmpeg geçişinde SponsorBlock aralıklarını keser ve/veya ses seviyesini eşitler (-14 LUFS).
+    Kapak ve etiketler korunur; hata olursa dosyaya dokunmaz."""
+    root, dot_ext = os.path.splitext(filepath)
+    ext = dot_ext.lstrip(".").lower()
+    if ext not in AUDIO_ENCODERS or not (cuts or loudnorm):
+        return False
+    filters = []
+    if cuts:
+        cond = "+".join(f"between(t,{a:.3f},{b:.3f})" for a, b in cuts)
+        filters += [f"aselect='not({cond})'", "asetpts=N/SR/TB"]
+    if loudnorm:
+        filters.append("loudnorm=I=-14:TP=-1.5:LRA=11")
+    tmp = f"{root}.tirtil-tmp{dot_ext}"
+    cmd = [get_ffmpeg_bin(), "-y", "-hide_banner", "-loglevel", "error", "-i", filepath,
+           "-map", "0:a:0", "-map", "0:v?", "-c:v", "copy", "-map_metadata", "0",
+           "-af", ",".join(filters), "-ar", "44100"]
+    cmd += AUDIO_ENCODERS[ext]
+    if ext in ("mp3", "m4a"):
+        cmd += ["-b:a", f"{bitrate}k"]
+    if ext == "mp3":
+        cmd += ["-id3v2_version", "3"]
+    cmd.append(tmp)
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
+        if r.returncode == 0 and os.path.getsize(tmp) > 0:
+            os.replace(tmp, filepath)
+            return True
+        write_persistent_log(f"ffmpeg yeniden yazma hatası: {r.stderr[-500:]}")
+    except Exception:
+        write_persistent_log(traceback.format_exc())
+    try:
+        os.remove(tmp)
+    except Exception:
+        pass
+    return False
+
+
+SPONSOR_CATEGORIES = ["sponsor", "selfpromo", "interaction", "intro", "outro", "music_offtopic"]
+
+
 def clear_ytdlp_cache():
     try:
         with yt_dlp.YoutubeDL({"quiet": True}) as ydl:
@@ -410,7 +514,13 @@ def expand_urls(urls):
 
 class BatchDownloader:
     def __init__(self, config):
-        self.urls = config.get("urls", [])
+        items = []
+        for u in config.get("urls", []):
+            if isinstance(u, str):
+                items.append({"url": u.strip(), "folder": ""})
+            elif isinstance(u, dict):
+                items.append({"url": str(u.get("url") or "").strip(), "folder": str(u.get("folder") or "")})
+        self.items = [i for i in items if i["url"]]
         self.download_folder = os.path.expanduser(config.get("download_folder") or os.path.join(HOME, "Downloads", "Tırtıl_Downloads"))
         self.format_choice = config.get("format", "mp3").lower()
         self.bitrate = str(config.get("bitrate", "320"))
@@ -421,9 +531,17 @@ class BatchDownloader:
         self.cookie_profile = None
         self.delay_mode = config.get("delay_mode", "safe")
         self.expand_playlists = bool(config.get("expand_playlists", False))
+        self.playlist_folders = bool(config.get("playlist_folders", True))
+        self.embed_meta = bool(config.get("embed_meta", True))
+        self.resolution = str(config.get("resolution") or "best")
+        self.skip_downloaded = bool(config.get("skip_downloaded", False))
+        self.archive_dir = config.get("archive_dir") or ""
+        self.loudnorm = bool(config.get("loudnorm", False))
+        self.sponsorblock = bool(config.get("sponsorblock", False))
         self.completed_count = 0
         self.failed_count = 0
-        self.total_count = len(self.urls)
+        self.skipped_count = 0
+        self.total_count = len(self.items)
         self.cancel_flag = False
         self.lock = threading.Lock()
 
@@ -449,7 +567,21 @@ class BatchDownloader:
             "fast": random.uniform(1.0, 2.0),
         }.get(self.delay_mode, 0.0)
 
-    def build_ydl_opts(self):
+    def item_dir(self, folder):
+        if folder and self.playlist_folders:
+            d = os.path.join(self.download_folder, sanitize_filename(folder))
+            os.makedirs(d, exist_ok=True)
+            return d
+        return self.download_folder
+
+    def archive_path(self):
+        if not (self.skip_downloaded and self.archive_dir):
+            return None
+        os.makedirs(self.archive_dir, exist_ok=True)
+        # Format başına ayrı arşiv: MP3 olarak inen bir video MP4 olarak yine inebilir
+        return os.path.join(self.archive_dir, f"archive_{self.format_choice}.txt")
+
+    def build_ydl_opts(self, folder=""):
         ffmpeg_bin = get_ffmpeg_bin()
         ffmpeg_dir = os.path.dirname(ffmpeg_bin) if os.path.isabs(ffmpeg_bin) else None
 
@@ -464,8 +596,11 @@ class BatchDownloader:
             "fragment_retries": 10,
             "file_access_retries": 5,
             "socket_timeout": 30,
-            "outtmpl": os.path.join(self.download_folder, "%(title)s.%(ext)s"),
+            "outtmpl": os.path.join(self.item_dir(folder), "%(title)s.%(ext)s"),
         }
+        archive = self.archive_path()
+        if archive:
+            opts["download_archive"] = archive
 
         rt_name, rt_path = get_node_bin()
         if rt_name:
@@ -477,7 +612,7 @@ class BatchDownloader:
 
         if self.format_choice == "mp4":
             opts.update({
-                "format": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best",
+                "format": self.video_format(),
                 "merge_output_format": "mp4",
             })
         else:
@@ -495,9 +630,37 @@ class BatchDownloader:
                 "keepvideo": False,
             })
 
+        pps = opts.setdefault("postprocessors", [])
+        if self.sponsorblock and self.format_choice != "mp4":
+            # Yalnızca segmentleri alır; kesim indirmeden sonra rewrite_audio ile yapılır
+            # (yt-dlp'nin ModifyChapters adımı pakette olmayan ffprobe'a ihtiyaç duyar)
+            pps.insert(0, {"key": "SponsorBlock", "categories": SPONSOR_CATEGORIES, "when": "after_filter"})
+
+        if self.embed_meta:
+            # Kapak resmi + etiketler (başlık, sanatçı, tarih). WAV kapak desteklemez.
+            pps.append({"key": "FFmpegMetadata", "add_metadata": True, "add_chapters": self.format_choice == "mp4"})
+            if self.format_choice != "wav":
+                opts["writethumbnail"] = True
+                pps.insert(0, {"key": "FFmpegThumbnailsConvertor", "format": "jpg", "when": "before_dl"})
+                pps.append({"key": "EmbedThumbnail"})
+                if self.format_choice != "mp4":
+                    # Müzik uygulamaları kare kapak bekler: 16:9 küçük resmi ortadan kare kırp
+                    opts.setdefault("postprocessor_args", {})["thumbnailsconvertor"] = [
+                        "-vf", "crop=min(iw\\,ih):min(iw\\,ih)"]
+
         if ffmpeg_dir:
             opts["ffmpeg_location"] = ffmpeg_dir
         return opts
+
+    def video_format(self):
+        """H.264 (avc1) + AAC: her Mac'te ve oynatıcıda açılır. YouTube H.264'ü en fazla 1080p verir;
+        1440p/4K yalnızca açıkça seçilirse VP9/AV1 olarak indirilir."""
+        h = int(self.resolution) if self.resolution.isdigit() else 1080
+        c = f"[height<={h}]"
+        if h > 1080:
+            return f"bestvideo{c}+bestaudio[ext=m4a]/bestvideo{c}+bestaudio/best{c}/best"
+        return (f"bestvideo{c}[vcodec^=avc1]+bestaudio[ext=m4a]/bestvideo{c}[ext=mp4]+bestaudio[ext=m4a]/"
+                f"bestvideo{c}+bestaudio/best{c}/best")
 
     def progress_hook(self, d, idx, total):
         if self.cancel_flag:
@@ -524,7 +687,8 @@ class BatchDownloader:
         p = info.get("filepath") or info.get("_filename")
         return p if p and os.path.isfile(p) else None
 
-    def download_one(self, idx, total, url):
+    def download_one(self, idx, total, item):
+        url = item["url"]
         if self.cancel_flag:
             return None
 
@@ -538,12 +702,23 @@ class BatchDownloader:
                 return None
 
             try:
-                ydl_opts = self.build_ydl_opts()
+                ydl_opts = self.build_ydl_opts(item["folder"])
                 ydl_opts["progress_hooks"] = [lambda d: self.progress_hook(d, idx, total)]
 
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     info = ydl.extract_info(url, download=False)
-                    title = info.get("title", f"audio_{idx}")
+                    # Arşivdeki videolar için yt-dlp bilgi döndürmez (None)
+                    title = info.get("title", f"audio_{idx}") if info else url
+                    send_event("item_start", index=idx, total=total, title=title)
+                    if self.skip_downloaded and (info is None or ydl.in_download_archive(info)):
+                        with self.lock:
+                            self.completed_count += 1
+                            self.skipped_count += 1
+                            overall = self.completed_count / total
+                        log(f"[{idx}/{total}] Daha önce indirilmiş, atlandı: {title}", "info")
+                        send_event("item_skipped", index=idx, total=total, title=title)
+                        send_event("progress", index=idx, total=total, percent=100.0, speed="", eta="", overall=overall)
+                        return True
                     log(f"[{idx}/{total}] İndiriliyor: {title} ({info.get('ext', '?')} ~{info.get('abr', '?')}kbps)", "info")
                     info = ydl.process_ie_result(info, download=True)
 
@@ -553,6 +728,20 @@ class BatchDownloader:
                 send_event("progress", index=idx, total=total, percent=100.0, speed="", eta="", overall=overall)
 
                 output_path = self._final_path(info)
+                cuts = []
+                if self.sponsorblock and output_path and self.format_choice != "mp4":
+                    cuts = merge_segments([(c["start_time"], c["end_time"]) for c in info.get("sponsorblock_chapters") or []],
+                                          info.get("duration") or 0)
+                    if cuts:
+                        secs = sum(b - a for a, b in cuts)
+                        log(f"[{idx}/{total}] SponsorBlock: {len(cuts)} bölüm kesiliyor ({secs:.0f} sn)", "info")
+                if output_path and self.format_choice != "mp4" and (cuts or self.loudnorm):
+                    if self.loudnorm:
+                        log(f"[{idx}/{total}] Ses seviyesi eşitleniyor...", "info")
+                    if not rewrite_audio(output_path, self.bitrate, cuts, self.loudnorm):
+                        log(f"[{idx}/{total}] Kesim/eşitleme yapılamadı, dosya olduğu gibi bırakıldı.", "warn")
+                        cuts = []
+                info["_tirtil_cuts"] = cuts
                 size_mb = 0.0
                 if output_path:
                     size_mb = os.path.getsize(output_path) / (1024 * 1024)
@@ -563,7 +752,7 @@ class BatchDownloader:
                 send_event("item_done", index=idx, total=total, title=title, size_mb=size_mb, file=output_path or "")
 
                 if self.split_enabled and output_path and self.format_choice != "mp4":
-                    self.handle_split(idx, total, output_path, sanitize_filename(title), info)
+                    self.handle_split(idx, total, output_path, sanitize_filename(title), info, self.item_dir(item["folder"]))
 
                 return True
 
@@ -613,7 +802,7 @@ class BatchDownloader:
 
         return False
 
-    def handle_split(self, idx, total, filepath, title_prefix, info):
+    def handle_split(self, idx, total, filepath, title_prefix, info, out_dir):
         log(f"[{idx}/{total}] Bölüm (chapter) bilgisi kontrol ediliyor...", "info")
         chapters = info.get("chapters") or []
         ch_list = []
@@ -624,6 +813,8 @@ class BatchDownloader:
                     "end": ch.get("end_time", 0),
                     "title": ch.get("title", ""),
                 })
+            if info.get("_tirtil_cuts"):
+                ch_list = shift_chapters(ch_list, info["_tirtil_cuts"])
             log(f"[{idx}/{total}] {len(ch_list)} YouTube bölümü bulundu", "success")
         else:
             log(f"[{idx}/{total}] FFmpeg ile sessizlik aralıkları aranıyor...", "info")
@@ -634,7 +825,7 @@ class BatchDownloader:
             return
 
         log(f"[{idx}/{total}] Ses {len(ch_list)} ayrı parçaya bölünüyor...", "info")
-        split_dir = os.path.join(self.download_folder, sanitize_filename(title_prefix))
+        split_dir = os.path.join(out_dir, sanitize_filename(title_prefix))
         os.makedirs(split_dir, exist_ok=True)
 
         results = split_audio_file(filepath, ch_list, split_dir, title_prefix, codec=self.format_choice, bitrate=f"{self.bitrate}k")
@@ -665,26 +856,35 @@ class BatchDownloader:
         return chapters
 
     def expand_queue(self):
-        if not any(playlist_id(u) for u in self.urls):
-            return
-        expanded = []
-        for r in expand_urls(self.urls):
-            if r.get("error"):
-                log(f"Çalma listesi açılamadı, tek link olarak denenecek: {r['url']} -- {r['error']}", "warn")
-            elif r.get("title"):
-                log(f"Çalma listesi genişletildi: {r['title']} ({len(r['entries'])} video)", "success")
-            for link in r["entries"]:
-                if link not in expanded:
-                    expanded.append(link)
-        self.urls = expanded
-        self.total_count = len(expanded)
+        # Genişletme kapalıyken bile düz çalma listesi sayfası (v= yok) tek iş gibi inmesin diye açılır
+        targets = [i["url"] for i in self.items if playlist_id(i["url"]) and (self.expand_playlists or "v=" not in i["url"])]
+        if targets:
+            results = {r["url"]: r for r in expand_urls(targets)}
+            expanded, seen = [], set()
+            for item in self.items:
+                r = results.get(item["url"])
+                if r is None:
+                    entries, folder = [item["url"]], item["folder"]
+                else:
+                    if r.get("error"):
+                        log(f"Çalma listesi açılamadı, tek link olarak denenecek: {r['url']} -- {r['error']}", "warn")
+                    elif r.get("title"):
+                        log(f"Çalma listesi genişletildi: {r['title']} ({len(r['entries'])} video)", "success")
+                    entries, folder = r["entries"], (r.get("title") or item["folder"])
+                for link in entries:
+                    if link not in seen:
+                        seen.add(link)
+                        expanded.append({"url": link, "folder": folder})
+            self.items = expanded
+            self.total_count = len(expanded)
+        send_event("queue", items=[{"index": n, "url": i["url"], "folder": i["folder"]} for n, i in enumerate(self.items, 1)])
 
     def run(self):
-        if self.expand_playlists:
-            self.expand_queue()
+        self.expand_queue()
         quality = "" if self.format_choice == "mp4" else f" {self.bitrate}kbps"
         log(f"İndirme başlıyor: {self.total_count} link [{self.format_choice.upper()}{quality}]", "info")
         log(f"Engel koruması: Cookie [{self.cookie_browser}] | Bekleme [{self.delay_mode}]", "info")
+        log(f"yt-dlp {yt_dlp.version.__version__} ({YTDLP_SOURCE})", "info")
         ffmpeg = _find_tool("ffmpeg")
         if not ffmpeg:
             log("FFmpeg bulunamadı! Uygulamayı yeniden indir veya: brew install ffmpeg", "error")
@@ -700,31 +900,36 @@ class BatchDownloader:
             log(f"Paralel mod: {active_workers} eşzamanlı indirme", "info")
             with concurrent.futures.ThreadPoolExecutor(max_workers=active_workers) as executor:
                 futures = []
-                for idx, url in enumerate(self.urls, 1):
+                for idx, item in enumerate(self.items, 1):
                     if self.cancel_flag:
                         break
-                    futures.append(executor.submit(self.download_one, idx, self.total_count, url))
+                    futures.append(executor.submit(self.download_one, idx, self.total_count, item))
                     delay = self.get_delay_seconds()
                     if delay > 0 and idx < self.total_count:
                         time.sleep(delay * 0.4)
                 concurrent.futures.wait(futures)
         else:
-            for idx, url in enumerate(self.urls, 1):
+            for idx, item in enumerate(self.items, 1):
                 if self.cancel_flag:
                     log("İndirme kullanıcı tarafından durduruldu.", "warn")
                     break
-                self.download_one(idx, self.total_count, url)
+                self.download_one(idx, self.total_count, item)
 
                 delay = self.get_delay_seconds()
                 if delay > 0 and idx < self.total_count and not self.cancel_flag:
                     log(f"Sonraki link öncesi {delay:.1f}s bekleme...", "info")
                     time.sleep(delay)
 
-        send_event("finished", success=self.completed_count, failed=self.failed_count, total=self.total_count, folder=self.download_folder)
+        send_event("finished", success=self.completed_count, failed=self.failed_count, skipped=self.skipped_count,
+                   total=self.total_count, folder=self.download_folder)
         log(f"Bitti! {self.completed_count}/{self.total_count} başarılı, {self.failed_count} başarısız.", "success" if self.failed_count == 0 else "warn")
 
 
 def main():
+    if len(sys.argv) >= 2 and sys.argv[1] == "--ytdlp-info":
+        send_event("ytdlp_info", version=yt_dlp.version.__version__, bundled=YTDLP_BUNDLED, source=YTDLP_SOURCE)
+        return
+
     if len(sys.argv) >= 3 and sys.argv[1] == "--expand":
         try:
             with open(sys.argv[2], "r", encoding="utf-8") as f:

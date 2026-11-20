@@ -210,3 +210,48 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.55); }
 .dialog-body { display: flex; flex-direction: column; gap: 12px; padding: 16px; }
 .dialog-body .hint { margin-top: 0; }
 .dialog-body textarea { height: 200px; }
+
+.options { margin-top: 10px; }
+.link-btn.inline { margin-left: 0; font-size: 12px; text-decoration: underline; }
+
+.queue {
+  max-height: 180px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+}
+.queue[hidden], #retry-row[hidden], .drop-overlay[hidden] { display: none; }
+.q-item {
+  display: grid;
+  grid-template-columns: 18px 1fr auto;
+  gap: 8px;
+  align-items: center;
+  padding: 5px 10px;
+  font-size: 12px;
+  border-bottom: 1px solid var(--line);
+}
+.q-item:last-child { border-bottom: none; }
+.q-icon { text-align: center; color: var(--muted); }
+.q-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: text; }
+.q-folder { color: var(--muted); }
+.q-meta { color: var(--muted); font-variant-numeric: tabular-nums; }
+.q-item.active .q-icon { color: var(--text); }
+.q-item.done .q-icon { color: var(--ok); }
+.q-item.skipped .q-icon { color: var(--muted); }
+.q-item.failed .q-icon, .q-item.failed .q-meta { color: var(--err); }
+
+.drop-overlay {
+  position: fixed;
+  inset: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px dashed var(--accent);
+  border-radius: 14px;
+  background: rgba(17, 17, 19, 0.85);
+  font-size: 15px;
+  font-weight: 600;
+  pointer-events: none;
+  z-index: 10;
+}

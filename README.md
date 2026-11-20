@@ -36,6 +36,11 @@ Chrome/Brave/Edge'de macOS Anahtar Zinciri izin sorar — "İzin Ver". Safari i�
 Uygulama açılışta GitHub'daki son sürümü denetler (menü: **Tırtıl → Güncellemeleri Denetle…**).
 Yeni sürüm varsa sorar; onaylanınca DMG'yi indirir, uygulamayı kapatıp yenisini yerine kurar ve yeniden açar.
 
+İndirme motoru yt-dlp ayrıca günde bir kez denetlenir (Gelişmiş → **yt-dlp'yi Güncelle** / **Otomatik güncelle**).
+Resmi yt-dlp sürümünün zipapp'i indirilir, aynı sürümün `SHA2-256SUMS` dosyasıyla doğrulanır ve
+`~/Library/Application Support/Tırtıl/yt-dlp/` altında saklanır; paketteki sürümden yeniyse o kullanılır.
+Böylece YouTube değişikliklerine karşı uygulamanın yeniden build edilmesi gerekmez.
+
 ## Yeni sürüm yayınlama
 
 1. `package.json` içindeki `version` değerini artır (ör. `1.2.1`).
@@ -55,7 +60,7 @@ npm start            # geliştirme modu
 npm run build        # dist/*.dmg
 ```
 
-YouTube değiştikçe yt-dlp güncellenmeli: `./scripts/setup.sh && npm run build`.
+Paketteki yt-dlp'yi yenilemek için: `./scripts/setup.sh && npm run build` (uygulama zaten kendini de günceller).
 
 ## Lisans
 

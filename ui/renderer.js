@@ -18,6 +18,15 @@ document.addEventListener('DOMContentLoaded', async () => {
   const progressMetrics = $('progress-metrics');
   const progressFill = $('progress-bar-fill');
   const logScreen = $('terminal-screen');
+  const selectResolution = $('select-resolution');
+  const resolutionSection = $('resolution-control-section');
+  const checkEmbedMeta = $('check-embed-meta');
+  const checkSkipDownloaded = $('check-skip-downloaded');
+  const checkPlaylistFolders = $('check-playlist-folders');
+  const checkLoudnorm = $('check-loudnorm');
+  const checkSponsorblock = $('check-sponsorblock');
+  const queueList = $('queue-list');
+  const retryRow = $('retry-row');
 
   const updatePill = $('update-pill');
   updatePill.addEventListener('click', () => api.checkUpdates());
@@ -75,6 +84,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     selectBitrate.disabled = !lossy;
     bitrateSection.classList.toggle('disabled', !lossy);
     checkSplit.disabled = fmt === 'mp4';
+    // Çözünürlük yalnızca video için; ses eşitleme ve SponsorBlock kesimi yalnızca ses için
+    selectResolution.disabled = fmt !== 'mp4';
+    resolutionSection.classList.toggle('disabled', fmt !== 'mp4');
+    checkLoudnorm.disabled = fmt === 'mp4';
+    checkSponsorblock.disabled = fmt === 'mp4';
     if (persist) api.saveSettings({ format: fmt });
     refresh();
   }
@@ -90,7 +104,17 @@ document.addEventListener('DOMContentLoaded', async () => {
   setSelect(selectBitrate, s.bitrate);
   setSelect(selectWorkers, s.workers);
   checkSplit.checked = !!s.split;
+  setSelect(selectResolution, s.resolution);
+  checkEmbedMeta.checked = s.embed_meta !== false;
+  checkSkipDownloaded.checked = !!s.skip_downloaded;
+  checkPlaylistFolders.checked = s.playlist_folders !== false;
+  checkLoudnorm.checked = !!s.loudnorm;
+  checkSponsorblock.checked = !!s.sponsorblock;
+  $('check-ytdlp-auto').checked = s.ytdlp_auto_update !== false;
   setFormat(s.format || 'mp3', false);
+
+  // Genişletilen çalma listesi videoları → liste adı (alt klasör için)
+  const playlistFolderOf = new Map();
 
   // Linkler
   urlInput.addEventListener('input', refresh);
@@ -128,6 +152,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       const idx = lines.findIndex(l => l.trim() === r.url);
       const fresh = r.entries.filter(e => !existing.has(e));
       fresh.forEach(e => existing.add(e));
+      if (r.title) r.entries.forEach(e => playlistFolderOf.set(e, r.title));
       if (idx >= 0) lines.splice(idx, 1, ...fresh);
       else lines.push(...fresh);
       if (r.title) appendLog(`Çalma listesi genişletildi: ${r.title} (${r.entries.length} video)`, 'success');
@@ -255,10 +280,96 @@ document.addEventListener('DOMContentLoaded', async () => {
   checkSplit.addEventListener('change', () => api.saveSettings({ split: checkSplit.checked }));
   selectCookieBrowser.addEventListener('change', () => api.saveSettings({ browser_cookie: selectCookieBrowser.value }));
   selectDelayMode.addEventListener('change', () => api.saveSettings({ delay_mode: selectDelayMode.value }));
+  selectResolution.addEventListener('change', () => api.saveSettings({ resolution: selectResolution.value }));
+  const bindCheck = (el, key) => el.addEventListener('change', () => api.saveSettings({ [key]: el.checked }));
+  bindCheck(checkEmbedMeta, 'embed_meta');
+  bindCheck(checkSkipDownloaded, 'skip_downloaded');
+  bindCheck(checkPlaylistFolders, 'playlist_folders');
+  bindCheck(checkLoudnorm, 'loudnorm');
+  bindCheck(checkSponsorblock, 'sponsorblock');
+  bindCheck($('check-ytdlp-auto'), 'ytdlp_auto_update');
+
+  $('btn-clear-archive').addEventListener('click', async () => {
+    if (!confirm('İndirme geçmişi silinsin mi? Daha önce indirilen videolar tekrar indirilebilir.')) return;
+    const res = await api.clearArchive();
+    if (res?.error) appendLog(`Geçmiş silinemedi: ${res.error}`, 'error');
+    else appendLog('İndirme geçmişi temizlendi.', 'success');
+  });
+
+  // yt-dlp sürümü ve güncelleme
+  const ytdlpLabel = $('ytdlp-version');
+  const btnYtdlp = $('btn-ytdlp-update');
+  const showYtdlp = (v, source) => { ytdlpLabel.textContent = `yt-dlp: ${v}${source === 'güncel' ? ' (güncellendi)' : ''}`; };
+  api.ytdlpInfo().then((i) => { if (i && !i.error) showYtdlp(i.version, i.source); else ytdlpLabel.textContent = 'yt-dlp: ?'; });
+  btnYtdlp.addEventListener('click', () => api.ytdlpUpdate());
+  api.onYtdlpStatus((st) => {
+    btnYtdlp.disabled = st.state === 'checking' || st.state === 'downloading';
+    if (st.state === 'checking') ytdlpLabel.textContent = 'yt-dlp: denetleniyor…';
+    else if (st.state === 'downloading') ytdlpLabel.textContent = `yt-dlp: ${st.version} indiriliyor…`;
+    else if (st.state === 'latest') {
+      showYtdlp(st.version, st.source);
+      if (st.manual) appendLog(`yt-dlp güncel (${st.version}).`, 'success');
+    } else if (st.state === 'updated') {
+      showYtdlp(st.version, st.source);
+      appendLog(`yt-dlp ${st.version} sürümüne güncellendi.`, 'success');
+    } else if (st.state === 'error') {
+      api.ytdlpInfo().then((i) => { if (i && !i.error) showYtdlp(i.version, i.source); });
+      if (st.manual) appendLog(`yt-dlp güncellenemedi: ${st.error}`, 'warn');
+    }
+  });
+
+  // Kuyruk listesi: her link için durum
+  const queueRows = new Map();
+  let failedUrls = [];
+  const ICONS = { waiting: '·', active: '↓', done: '✓', skipped: '↷', failed: '✗' };
+  function setRow(index, state, meta) {
+    const row = queueRows.get(index);
+    if (!row) return;
+    row.el.className = `q-item ${state}`;
+    row.icon.textContent = ICONS[state] || '·';
+    if (meta !== undefined) row.meta.textContent = meta;
+  }
+  function renderQueue(items) {
+    queueRows.clear();
+    queueList.replaceChildren();
+    for (const it of items) {
+      const el = document.createElement('div');
+      const icon = document.createElement('span');
+      icon.className = 'q-icon';
+      const title = document.createElement('span');
+      title.className = 'q-title';
+      title.textContent = it.url;
+      if (it.folder) {
+        const f = document.createElement('span');
+        f.className = 'q-folder';
+        f.textContent = `${it.folder} / `;
+        title.prepend(f);
+      }
+      const meta = document.createElement('span');
+      meta.className = 'q-meta';
+      el.append(icon, title, meta);
+      queueList.appendChild(el);
+      queueRows.set(it.index, { el, icon, title, meta, url: it.url });
+      setRow(it.index, 'waiting', '');
+    }
+    queueList.hidden = !items.length;
+  }
+  function setRowTitle(index, text) {
+    const row = queueRows.get(index);
+    if (!row) return;
+    const folder = row.title.querySelector('.q-folder');
+    row.title.textContent = text;
+    if (folder) row.title.prepend(folder);
+    row.title.title = row.url;
+  }
 
   // İndirme
   function finish(ok) {
     isDownloading = false;
+    for (const [i, row] of queueRows) {
+      if (/waiting|active/.test(row.el.className)) setRow(i, 'waiting', ok ? '' : 'durduruldu');
+    }
+    retryRow.hidden = !failedUrls.length;
     btnStart.disabled = false;
     btnCancel.disabled = true;
     if (ok) progressFill.style.width = '100%';
@@ -277,9 +388,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     progressFill.style.width = '0%';
     progressStatus.textContent = 'Başlatılıyor…';
     progressMetrics.textContent = `0/${urls.length}`;
+    failedUrls = [];
+    retryRow.hidden = true;
+    renderQueue([]);
 
     const res = await api.startDownload({
-      urls,
+      urls: urls.map(url => ({ url, folder: playlistFolderOf.get(url) || '' })),
       download_folder: downloadFolder,
       format: selectedFormat,
       bitrate: selectBitrate.value,
@@ -287,12 +401,25 @@ document.addEventListener('DOMContentLoaded', async () => {
       split: checkSplit.checked && selectedFormat !== 'mp4',
       cookie_browser: selectCookieBrowser.value,
       delay_mode: selectDelayMode.value,
-      expand_playlists: checkExpand.checked
+      expand_playlists: checkExpand.checked,
+      playlist_folders: checkPlaylistFolders.checked,
+      embed_meta: checkEmbedMeta.checked,
+      resolution: selectResolution.value,
+      skip_downloaded: checkSkipDownloaded.checked,
+      loudnorm: checkLoudnorm.checked && selectedFormat !== 'mp4',
+      sponsorblock: checkSponsorblock.checked && selectedFormat !== 'mp4'
     });
     if (res?.error) {
       appendLog(res.error, 'error');
       finish(false);
     }
+  });
+
+  $('btn-retry-failed').addEventListener('click', () => {
+    if (isDownloading || !failedUrls.length) return;
+    urlInput.value = failedUrls.join('\n');
+    refresh();
+    btnStart.click();
   });
 
   btnCancel.addEventListener('click', async () => {
@@ -310,18 +437,74 @@ document.addEventListener('DOMContentLoaded', async () => {
         progressFill.style.width = `${pct}%`;
         progressStatus.textContent = `İndiriliyor ${d.index}/${d.total}`;
         progressMetrics.textContent = [`${pct}%`, d.speed, d.eta && `kalan ${d.eta}`].filter(Boolean).join(' · ');
+        const row = queueRows.get(d.index);
+        if (row && row.el.classList.contains('active')) setRow(d.index, 'active', `%${Math.round(d.percent || 0)}`);
         break;
       }
+      case 'queue':
+        renderQueue(d.items || []);
+        break;
+      case 'item_start':
+        setRowTitle(d.index, d.title);
+        setRow(d.index, 'active', '');
+        break;
+      case 'item_done':
+        setRowTitle(d.index, d.title);
+        setRow(d.index, 'done', d.size_mb ? `${d.size_mb.toFixed(1)} MB` : '');
+        break;
+      case 'item_skipped':
+        setRow(d.index, 'skipped', 'zaten var');
+        break;
+      case 'item_failed':
+        if (d.url) failedUrls.push(d.url);
+        setRow(d.index, 'failed', 'başarısız');
+        if (queueRows.get(d.index)) queueRows.get(d.index).el.title = d.error || '';
+        break;
       case 'error':
         appendLog(d.error, 'error');
         break;
       case 'finished':
         finish(d.failed === 0);
-        progressMetrics.textContent = `${d.success}/${d.total} başarılı`;
+        progressMetrics.textContent = [`${d.success - (d.skipped || 0)}/${d.total} indirildi`,
+          d.skipped && `${d.skipped} atlandı`, d.failed && `${d.failed} başarısız`].filter(Boolean).join(' · ');
         break;
       case 'engine_stopped':
         if (isDownloading) finish(false);
         break;
     }
+  });
+  // Sürükle-bırak: link, metin ya da .txt dosyası
+  const dropOverlay = $('drop-overlay');
+  let dragDepth = 0;
+  window.addEventListener('dragenter', (e) => {
+    e.preventDefault();
+    dragDepth++;
+    dropOverlay.hidden = false;
+  });
+  window.addEventListener('dragleave', () => {
+    dragDepth = Math.max(0, dragDepth - 1);
+    if (!dragDepth) dropOverlay.hidden = true;
+  });
+  window.addEventListener('dragover', (e) => e.preventDefault());
+  window.addEventListener('drop', async (e) => {
+    e.preventDefault();
+    dragDepth = 0;
+    dropOverlay.hidden = true;
+    const dt = e.dataTransfer;
+    let text = '';
+    for (const file of dt.files || []) {
+      if (file.size > 5 * 1024 * 1024) {
+        appendLog(`${file.name} çok büyük, atlandı.`, 'warn');
+        continue;
+      }
+      if (/\.(txt|csv|md|url|webloc)$/i.test(file.name) || file.type.startsWith('text/')) {
+        text += '\n' + await file.text();
+      }
+    }
+    text += '\n' + (dt.getData('text/uri-list') || '') + '\n' + (dt.getData('text/plain') || '');
+    const lines = text.split(/\r?\n/).filter(l => !l.trim().startsWith('#')).join('\n');
+    const urls = extractUrls(lines);
+    if (!urls.length) return appendLog('Bırakılan içerikte link bulunamadı.', 'warn');
+    if (!addUrls(urls, 'Sürükle-bırak')) appendLog('Bırakılan linkler zaten listede.', 'info');
   });
 });

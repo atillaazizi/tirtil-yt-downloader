@@ -61,8 +61,20 @@
             <option value="128">128 kbps</option>
           </select>
         </label>
+        <label class="field" id="resolution-control-section">Çözünürlük
+          <select id="select-resolution">
+            <option value="best">En iyi (1080p)</option>
+            <option value="2160">4K (VP9/AV1)</option>
+            <option value="1440">1440p (VP9/AV1)</option>
+            <option value="720">720p</option>
+            <option value="480">480p</option>
+          </select>
+        </label>
         <label class="check" title="YouTube bölümlerine, yoksa sessizliklere göre parçalara böler">
           <input type="checkbox" id="check-split"> Parçalara böl (albüm / derleme)
+        </label>
+        <label class="check" title="Başlık, sanatçı, tarih ve kapak resmini dosyaya yazar">
+          <input type="checkbox" id="check-embed-meta" checked> Kapak ve etiket ekle
         </label>
       </div>
 
@@ -97,6 +109,28 @@
             </select>
           </label>
         </div>
+        <div class="row wrap options">
+          <label class="check" title="Bu formatta daha önce indirdiğin videoları tekrar indirmez">
+            <input type="checkbox" id="check-skip-downloaded"> Daha önce indirilenleri atla
+          </label>
+          <button class="link-btn inline" id="btn-clear-archive" title="İndirme geçmişini siler">Geçmişi temizle</button>
+          <label class="check" title="Genişletilen çalma listesinin videoları liste adıyla bir klasöre iner">
+            <input type="checkbox" id="check-playlist-folders" checked> Çalma listelerini ayrı klasöre koy
+          </label>
+          <label class="check" title="Tüm parçaları aynı ses seviyesine getirir (-14 LUFS)">
+            <input type="checkbox" id="check-loudnorm"> Ses seviyesini eşitle
+          </label>
+          <label class="check" title="SponsorBlock verisine göre sponsor, giriş/kapanış ve müzik dışı kısımları keser (yalnızca ses)">
+            <input type="checkbox" id="check-sponsorblock"> Sponsor ve müzik dışı kısımları kes
+          </label>
+        </div>
+        <div class="row wrap options">
+          <span class="small" id="ytdlp-version">yt-dlp: …</span>
+          <button class="btn" id="btn-ytdlp-update">yt-dlp'yi Güncelle</button>
+          <label class="check" title="YouTube değiştikçe indirme motoru günde bir kez kendini günceller">
+            <input type="checkbox" id="check-ytdlp-auto" checked> Otomatik güncelle
+          </label>
+        </div>
         <p class="hint">Normalde cookie gerekmez. YouTube "bot" engeli verirse, giriş yapılmış tarayıcıyı seç. Chrome/Brave/Edge için macOS Anahtar Zinciri izni sorarsa "İzin Ver" seç.</p>
       </details>
     </section>
@@ -112,9 +146,15 @@
         <span id="progress-metrics"></span>
       </div>
       <div class="track"><div class="fill" id="progress-bar-fill"></div></div>
+      <div class="queue" id="queue-list" hidden></div>
+      <div class="row" id="retry-row" hidden>
+        <button class="btn" id="btn-retry-failed">Başarısızları tekrar dene</button>
+      </div>
       <div class="log" id="terminal-screen"></div>
     </section>
   </main>
+
+  <div class="drop-overlay" id="drop-overlay" hidden>Linkleri ya da .txt dosyasını bırak</div>
 
   <dialog id="multi-url-dialog">
     <form method="dialog" class="dialog-body">

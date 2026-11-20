@@ -1,8 +1,9 @@
-const { app, BrowserWindow, ipcMain, dialog, shell, Menu, clipboard } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, Menu, clipboard, Notification } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
 const { checkForUpdates } = require('./updater');
+const { createYtdlpUpdater } = require('./ytdlp');
 
 const APP_NAME = 'Tırtıl YT Downloader';
 app.setName('Tırtıl');
@@ -35,12 +36,15 @@ function buildEngineEnv() {
   const env = { ...process.env, PATH: merged.join(':'), PYTHONUNBUFFERED: '1', PYTHONIOENCODING: 'utf-8', ATI_LOG_DIR: LOG_DIR };
   const res = app.isPackaged ? process.resourcesPath : PROJECT_ROOT;
   env.ATI_ELECTRON_EXEC = process.execPath;
+  env.ATI_YTDLP_DIR = YTDLP_DIR;
   env.ATI_NODE_BIN = path.join(res, 'bin', 'node');
   env.ATI_FFMPEG_DIR = app.isPackaged
     ? path.join(res, 'ffmpeg')
     : path.dirname(require('ffmpeg-static'));
   return env;
 }
+
+const YTDLP_DIR = path.join(APP_DATA_DIR, 'yt-dlp');
 
 function loadSettings() {
   if (fs.existsSync(SETTINGS_FILE)) {
@@ -293,14 +297,67 @@ async function promptCookiePermission(browsers) {
   }
 }
 
+function setDockProgress(value) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  const v = Number(value);
+  mainWindow.setProgressBar(v < 0 || !Number.isFinite(v) ? -1 : Math.min(1, Math.max(0, v)));
+}
+
+// Uzun bir liste bitince, pencere öndeyken değil, arka plandayken haber ver
+function notifyFinished(p) {
+  if (!Notification.isSupported() || (mainWindow && !mainWindow.isDestroyed() && mainWindow.isFocused())) return;
+  const parts = [`${p.success - (p.skipped || 0)} indirildi`];
+  if (p.skipped) parts.push(`${p.skipped} atlandı`);
+  if (p.failed) parts.push(`${p.failed} başarısız`);
+  const n = new Notification({
+    title: p.failed ? 'İndirme bitti (hatalı)' : 'İndirme bitti',
+    body: parts.join(' · ')
+  });
+  n.on('click', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.show();
+  });
+  n.show();
+}
+
+ipcMain.handle('clear-archive', () => {
+  let removed = 0;
+  try {
+    for (const f of fs.readdirSync(APP_DATA_DIR)) {
+      if (/^archive_[a-z0-9]+\.txt$/.test(f)) {
+        fs.unlinkSync(path.join(APP_DATA_DIR, f));
+        removed++;
+      }
+    }
+  } catch (err) {
+    return { error: err.message };
+  }
+  return { removed };
+});
+
+const ytdlpUpdater = createYtdlpUpdater({
+  dir: YTDLP_DIR,
+  getEngineCommand,
+  buildEngineEnv,
+  isBusy: () => !!currentEngineProcess,
+  loadSettings,
+  saveSettings,
+  notify: (status) => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('ytdlp-status', status);
+  }
+});
+ipcMain.handle('ytdlp-info', () => ytdlpUpdater.getInfo());
+ipcMain.handle('ytdlp-update', () => ytdlpUpdater.check(true));
+
 ipcMain.handle('start-download', async (_e, config) => {
   if (currentEngineProcess) {
     return { error: 'İndirme zaten çalışıyor.' };
   }
 
   const tempConfigFile = path.join(APP_DATA_DIR, `job_${Date.now()}.json`);
+  // Arşiv konumu renderer'dan alınmaz, her zaman uygulama verisindedir
+  const job = { ...config, archive_dir: APP_DATA_DIR };
   try {
-    fs.writeFileSync(tempConfigFile, JSON.stringify(config), 'utf-8');
+    fs.writeFileSync(tempConfigFile, JSON.stringify(job), 'utf-8');
   } catch (err) {
     return { error: `Kuyruk hazırlanamadı: ${err.message}` };
   }
@@ -338,6 +395,12 @@ ipcMain.handle('start-download', async (_e, config) => {
       }
       send(payload);
       if (payload.event === 'cookie_permission') promptCookiePermission(payload.browsers);
+      if (payload.event === 'progress') setDockProgress(payload.overall);
+      if (payload.event === 'finished') {
+        setDockProgress(-1);
+        notifyFinished(payload);
+        if (payload.failed > 0) ytdlpUpdater.check(false, true);
+      }
     }
   });
 
@@ -354,6 +417,7 @@ ipcMain.handle('start-download', async (_e, config) => {
 
   proc.on('close', (code) => {
     if (currentEngineProcess === proc) currentEngineProcess = null;
+    setDockProgress(-1);
     try {
       if (fs.existsSync(tempConfigFile)) fs.unlinkSync(tempConfigFile);
     } catch (_) {}
@@ -395,6 +459,10 @@ app.whenReady().then(() => {
   createMainWindow();
   // Paketli sürümde açılıştan kısa süre sonra sessizce denetle.
   if (app.isPackaged) setTimeout(() => runUpdateCheck(false), 4000);
+  // yt-dlp günde en fazla bir kez sessizce denetlenir
+  setTimeout(() => ytdlpUpdater.check(false), 8000);
+  // Uygulama günlerce açık kalırsa da güncel kalsın
+  setInterval(() => ytdlpUpdater.check(false), 6 * 60 * 60 * 1000);
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createMainWindow();

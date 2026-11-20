@@ -11,6 +11,12 @@ contextBridge.exposeInMainWorld('atiAPI', {
   cancelDownload: () => ipcRenderer.invoke('cancel-download'),
   readClipboard: () => ipcRenderer.invoke('read-clipboard'),
   expandPlaylists: (urls) => ipcRenderer.invoke('expand-playlists', urls),
+  clearArchive: () => ipcRenderer.invoke('clear-archive'),
+  ytdlpInfo: () => ipcRenderer.invoke('ytdlp-info'),
+  ytdlpUpdate: () => ipcRenderer.invoke('ytdlp-update'),
+  onYtdlpStatus: (callback) => {
+    ipcRenderer.on('ytdlp-status', (_e, data) => callback(data));
+  },
   checkUpdates: () => ipcRenderer.invoke('check-updates'),
   onUpdateStatus: (callback) => {
     ipcRenderer.on('update-status', (_e, data) => callback(data));
