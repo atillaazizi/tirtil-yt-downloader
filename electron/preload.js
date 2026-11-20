@@ -9,6 +9,8 @@ contextBridge.exposeInMainWorld('atiAPI', {
   openLogs: () => ipcRenderer.invoke('open-logs'),
   startDownload: (config) => ipcRenderer.invoke('start-download', config),
   cancelDownload: () => ipcRenderer.invoke('cancel-download'),
+  readClipboard: () => ipcRenderer.invoke('read-clipboard'),
+  expandPlaylists: (urls) => ipcRenderer.invoke('expand-playlists', urls),
   checkUpdates: () => ipcRenderer.invoke('check-updates'),
   onUpdateStatus: (callback) => {
     ipcRenderer.on('update-status', (_e, data) => callback(data));

@@ -19,13 +19,22 @@
       <div class="row between">
         <h2>Linkler <span class="badge" id="url-counter">0</span></h2>
         <div class="row">
-          <button class="btn" id="btn-paste-clip">Yapıştır</button>
+          <button class="btn" id="btn-paste-clip">URL Yapıştır</button>
+          <button class="btn" id="btn-multi-url">Çoklu URL Ekle</button>
           <button class="btn" id="btn-import-txt">.txt Aç</button>
           <button class="btn" id="btn-clear-urls">Temizle</button>
         </div>
       </div>
       <textarea id="url-input" spellcheck="false"
         placeholder="YouTube linklerini yapıştır (her satıra bir link)&#10;https://www.youtube.com/watch?v=...&#10;https://youtu.be/..."></textarea>
+      <div class="row wrap">
+        <label class="check" title="Bir YouTube linki kopyaladığında listeye kendiliğinden eklenir">
+          <input type="checkbox" id="check-auto-clip"> Panodan otomatik ekle
+        </label>
+        <label class="check" title="Çalma listesi linkini içindeki videoların tek tek linklerine açar">
+          <input type="checkbox" id="check-expand-playlist"> Çalma listesini otomatik genişlet
+        </label>
+      </div>
       <div class="row between folder">
         <span class="path" id="folder-path-display">…</span>
         <div class="row">
@@ -106,6 +115,21 @@
       <div class="log" id="terminal-screen"></div>
     </section>
   </main>
+
+  <dialog id="multi-url-dialog">
+    <form method="dialog" class="dialog-body">
+      <h2>Çoklu URL Ekle</h2>
+      <p class="hint">İstediğin kadar link yapıştır. Boşluk, virgül ya da satırla ayrılabilir; metin içindeki linkler de bulunur.</p>
+      <textarea id="multi-url-input" spellcheck="false" placeholder="https://youtu.be/... https://www.youtube.com/watch?v=..."></textarea>
+      <div class="row between">
+        <span class="small" id="multi-url-count">0 link bulundu</span>
+        <div class="row">
+          <button class="btn" value="cancel">Vazgeç</button>
+          <button class="btn primary-sm" id="multi-url-add" value="add">Ekle</button>
+        </div>
+      </div>
+    </form>
+  </dialog>
 
   <script src="renderer.js"></script>
 </body>

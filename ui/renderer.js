@@ -95,24 +95,135 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Linkler
   urlInput.addEventListener('input', refresh);
 
+  const checkAutoClip = $('check-auto-clip');
+  const checkExpand = $('check-expand-playlist');
+  checkAutoClip.checked = !!s.auto_clipboard;
+  checkExpand.checked = !!s.expand_playlists;
+
+  // Metnin içindeki tüm linkleri bulur (satır, boşluk, virgül fark etmez)
+  const URL_RE = /https?:\/\/[^\s"'<>,]+/g;
+  const BARE_YT_RE = /(?:^|[\s,])((?:www\.|m\.|music\.)?(?:youtube\.com|youtu\.be)\/[^\s"'<>,]+)/g;
+  function extractUrls(text, youtubeOnly = false) {
+    const found = (text.match(URL_RE) || []).map(u => u.replace(/[).\]]+$/, ''));
+    for (const m of text.matchAll(BARE_YT_RE)) found.push('https://' + m[1]);
+    const urls = [...new Set(found)];
+    return youtubeOnly ? urls.filter(u => /^https?:\/\/([\w-]+\.)?(youtube\.com|youtu\.be)\//i.test(u)) : urls;
+  }
+  const isPlaylist = (u) => /youtu/.test(u) && /[?&]list=(?!RD)[\w-]+/.test(u);
+
+  let expanding = false;
+  async function expandInList(playlists) {
+    expanding = true;
+    appendLog(`${playlists.length} çalma listesi açılıyor…`, 'info');
+    const res = await api.expandPlaylists(playlists);
+    expanding = false;
+    if (res?.error) return appendLog(`Çalma listesi açılamadı: ${res.error}`, 'warn');
+    const lines = urlInput.value.split('\n');
+    const existing = new Set(lines.map(l => l.trim()));
+    for (const r of res.results || []) {
+      if (r.error) {
+        appendLog(`Çalma listesi açılamadı (${r.error}). Link olduğu gibi bırakıldı.`, 'warn');
+        continue;
+      }
+      const idx = lines.findIndex(l => l.trim() === r.url);
+      const fresh = r.entries.filter(e => !existing.has(e));
+      fresh.forEach(e => existing.add(e));
+      if (idx >= 0) lines.splice(idx, 1, ...fresh);
+      else lines.push(...fresh);
+      if (r.title) appendLog(`Çalma listesi genişletildi: ${r.title} (${r.entries.length} video)`, 'success');
+    }
+    urlInput.value = lines.filter(l => l.trim()).join('\n');
+    refresh();
+  }
+
+  // Yeni linkleri listeye ekler, var olanları atlar. Eklenen sayısını döner.
+  function addUrls(urls, source) {
+    const existing = new Set(urlInput.value.split('\n').map(l => l.trim()));
+    const fresh = urls.filter(u => !existing.has(u));
+    if (fresh.length) {
+      const cur = urlInput.value.trim();
+      urlInput.value = (cur ? cur + '\n' : '') + fresh.join('\n');
+      refresh();
+      appendLog(`${source}: ${fresh.length} link eklendi.`, 'success');
+      const playlists = fresh.filter(isPlaylist);
+      if (checkExpand.checked && playlists.length) expandInList(playlists);
+    }
+    return fresh.length;
+  }
+
   $('btn-paste-clip').addEventListener('click', async () => {
     try {
-      const text = (await navigator.clipboard.readText()).trim();
+      const text = (await api.readClipboard()).trim();
       if (!text) return appendLog('Pano boş.', 'warn');
-      urlInput.value = urlInput.value.trim() ? urlInput.value.trim() + '\n' + text : text;
-      refresh();
+      const urls = extractUrls(text);
+      if (!urls.length) return appendLog('Panoda link bulunamadı.', 'warn');
+      if (!addUrls(urls, 'Pano')) appendLog('Panodaki linkler zaten listede.', 'info');
     } catch (err) {
       appendLog(`Pano okunamadı: ${err.message}`, 'warn');
     }
   });
 
+  // Panodan otomatik ekle: pano değiştiğinde YouTube linklerini yakalar
+  let lastClip = null;
+  let clipTimer = null;
+  async function pollClipboard() {
+    if (!checkAutoClip.checked || expanding) return;
+    try {
+      const text = await api.readClipboard();
+      if (text === lastClip) return;
+      lastClip = text;
+      const urls = extractUrls(text || '', true);
+      if (urls.length) addUrls(urls, 'Panodan otomatik');
+    } catch (_) {}
+  }
+  function setAutoClip(on) {
+    clearInterval(clipTimer);
+    clipTimer = null;
+    if (on) {
+      clipTimer = setInterval(pollClipboard, 1500);
+      pollClipboard();
+    }
+  }
+  checkAutoClip.addEventListener('change', () => {
+    api.saveSettings({ auto_clipboard: checkAutoClip.checked });
+    setAutoClip(checkAutoClip.checked);
+  });
+  window.addEventListener('focus', pollClipboard);
+  setAutoClip(checkAutoClip.checked);
+
+  checkExpand.addEventListener('change', () => {
+    api.saveSettings({ expand_playlists: checkExpand.checked });
+    if (checkExpand.checked) {
+      const playlists = getUrls().filter(isPlaylist);
+      if (playlists.length) expandInList(playlists);
+    }
+  });
+
+  // Çoklu URL ekle
+  const multiDialog = $('multi-url-dialog');
+  const multiInput = $('multi-url-input');
+  const multiCount = $('multi-url-count');
+  const updateMultiCount = () => { multiCount.textContent = `${extractUrls(multiInput.value).length} link bulundu`; };
+  multiInput.addEventListener('input', updateMultiCount);
+  $('btn-multi-url').addEventListener('click', () => {
+    multiInput.value = '';
+    multiDialog.returnValue = '';
+    updateMultiCount();
+    multiDialog.showModal();
+    multiInput.focus();
+  });
+  multiDialog.addEventListener('close', () => {
+    if (multiDialog.returnValue !== 'add') return;
+    const urls = extractUrls(multiInput.value);
+    if (!urls.length) return appendLog('Eklenecek link bulunamadı.', 'warn');
+    if (!addUrls(urls, 'Çoklu ekleme')) appendLog('Linklerin hepsi zaten listede.', 'info');
+  });
+
   $('btn-import-txt').addEventListener('click', async () => {
     const res = await api.pickTxtFile();
     if (res?.success) {
-      const add = res.urls.join('\n');
-      urlInput.value = urlInput.value.trim() ? urlInput.value.trim() + '\n' + add : add;
-      refresh();
-      appendLog(`${res.filename}: ${res.count} link eklendi.`, 'success');
+      const added = addUrls(res.urls, res.filename);
+      if (!added) appendLog(`${res.filename}: yeni link yok.`, 'info');
     } else if (res?.error) {
       appendLog(`Dosya okunamadı: ${res.error}`, 'error');
     }
@@ -175,7 +286,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       workers: parseInt(selectWorkers.value, 10) || 3,
       split: checkSplit.checked && selectedFormat !== 'mp4',
       cookie_browser: selectCookieBrowser.value,
-      delay_mode: selectDelayMode.value
+      delay_mode: selectDelayMode.value,
+      expand_playlists: checkExpand.checked
     });
     if (res?.error) {
       appendLog(res.error, 'error');

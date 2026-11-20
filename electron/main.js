@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, Menu, clipboard } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
@@ -197,16 +197,59 @@ ipcMain.handle('pick-txt-file', async () => {
   if (!result.canceled && result.filePaths.length > 0) {
     try {
       const content = fs.readFileSync(result.filePaths[0], 'utf-8');
-      const urls = content
+      const urls = [...new Set(content
         .split(/\r?\n/)
-        .map(l => l.trim())
-        .filter(l => l && !l.startsWith('#') && (l.includes('http') || l.includes('youtu')));
+        .filter(l => !l.trim().startsWith('#'))
+        .flatMap(l => l.match(/https?:\/\/[^\s"'<>,]+/g) || []))];
       return { success: true, urls, count: urls.length, filename: path.basename(result.filePaths[0]) };
     } catch (err) {
       return { success: false, error: err.message };
     }
   }
   return { canceled: true };
+});
+
+ipcMain.handle('read-clipboard', () => {
+  const text = clipboard.readText();
+  // Pano dev bir metin olabilir; renderer'a yalnızca makul boyutu gönder.
+  return text.length > 200000 ? text.slice(0, 200000) : text;
+});
+
+// Çalma listesi linklerini engine ile tek tek video linklerine açar.
+ipcMain.handle('expand-playlists', async (_e, urls) => {
+  if (!Array.isArray(urls) || !urls.length) return { results: [] };
+  const list = urls.filter(u => typeof u === 'string' && /^https?:\/\//.test(u)).slice(0, 200);
+  const tempFile = path.join(APP_DATA_DIR, `expand_${Date.now()}.json`);
+  try {
+    fs.writeFileSync(tempFile, JSON.stringify({ urls: list }), 'utf-8');
+  } catch (err) {
+    return { error: err.message };
+  }
+  const { cmd, args } = getEngineCommand(['--expand', tempFile]);
+  return new Promise((resolve) => {
+    let out = '';
+    let done = false;
+    const proc = spawn(cmd, args, { cwd: APP_DATA_DIR, env: buildEngineEnv(), stdio: ['ignore', 'pipe', 'ignore'] });
+    const finish = (result) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      try { fs.unlinkSync(tempFile); } catch (_) {}
+      resolve(result);
+    };
+    const timer = setTimeout(() => { proc.kill('SIGTERM'); finish({ error: 'Çalma listesi zaman aşımı' }); }, 120000);
+    proc.stdout.on('data', (c) => { out += c.toString('utf-8'); });
+    proc.on('error', (err) => finish({ error: err.message }));
+    proc.on('close', () => {
+      for (const line of out.split('\n')) {
+        try {
+          const p = JSON.parse(line);
+          if (p.event === 'expanded') return finish({ results: p.results || [] });
+        } catch (_) {}
+      }
+      finish({ error: 'Çalma listesi okunamadı' });
+    });
+  });
 });
 
 ipcMain.handle('open-folder', (_e, targetPath) => {

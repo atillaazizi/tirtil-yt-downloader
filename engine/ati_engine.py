@@ -360,6 +360,54 @@ def clear_ytdlp_cache():
         return False
 
 
+_LIST_RE = re.compile(r"[?&]list=([A-Za-z0-9_-]+)")
+
+
+def playlist_id(url):
+    """YouTube çalma listesi kimliği. Otomatik Mix/radyo listeleri (RD...) sonsuz ve kişiye özel
+    olduğu için genişletilmez; o linkler tek video olarak kalır."""
+    if "youtu" not in (url or ""):
+        return None
+    m = _LIST_RE.search(url)
+    if not m or m.group(1).startswith("RD"):
+        return None
+    return m.group(1)
+
+
+def expand_playlist(url):
+    """Çalma listesini video linklerine açar. Dönüş: (başlık, [linkler])."""
+    pid = playlist_id(url)
+    opts = {"quiet": True, "no_warnings": True, "extract_flat": "in_playlist", "skip_download": True,
+            "socket_timeout": 30, "extractor_retries": 3}
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        info = ydl.extract_info(f"https://www.youtube.com/playlist?list={pid}", download=False)
+    links = []
+    for e in info.get("entries") or []:
+        if not e:
+            continue
+        vid = e.get("id")
+        link = f"https://www.youtube.com/watch?v={vid}" if vid else e.get("url")
+        if link and link not in links:
+            links.append(link)
+    return info.get("title") or pid, links
+
+
+def expand_urls(urls):
+    """Her link için {url, title, entries, error}. Liste olmayanlar olduğu gibi döner."""
+    results = []
+    for url in urls:
+        if not playlist_id(url):
+            results.append({"url": url, "entries": [url]})
+            continue
+        try:
+            title, links = expand_playlist(url)
+            results.append({"url": url, "title": title, "entries": links or [url]})
+        except Exception as e:
+            write_persistent_log(traceback.format_exc())
+            results.append({"url": url, "entries": [url], "error": str(e)[:180]})
+    return results
+
+
 class BatchDownloader:
     def __init__(self, config):
         self.urls = config.get("urls", [])
@@ -372,6 +420,7 @@ class BatchDownloader:
         self.cookie_browser = None
         self.cookie_profile = None
         self.delay_mode = config.get("delay_mode", "safe")
+        self.expand_playlists = bool(config.get("expand_playlists", False))
         self.completed_count = 0
         self.failed_count = 0
         self.total_count = len(self.urls)
@@ -615,7 +664,24 @@ class BatchDownloader:
                 chapters.append({"start": s, "end": e, "title": f"Parça {len(chapters)+1:02d}"})
         return chapters
 
+    def expand_queue(self):
+        if not any(playlist_id(u) for u in self.urls):
+            return
+        expanded = []
+        for r in expand_urls(self.urls):
+            if r.get("error"):
+                log(f"Çalma listesi açılamadı, tek link olarak denenecek: {r['url']} -- {r['error']}", "warn")
+            elif r.get("title"):
+                log(f"Çalma listesi genişletildi: {r['title']} ({len(r['entries'])} video)", "success")
+            for link in r["entries"]:
+                if link not in expanded:
+                    expanded.append(link)
+        self.urls = expanded
+        self.total_count = len(expanded)
+
     def run(self):
+        if self.expand_playlists:
+            self.expand_queue()
         quality = "" if self.format_choice == "mp4" else f" {self.bitrate}kbps"
         log(f"İndirme başlıyor: {self.total_count} link [{self.format_choice.upper()}{quality}]", "info")
         log(f"Engel koruması: Cookie [{self.cookie_browser}] | Bekleme [{self.delay_mode}]", "info")
@@ -659,6 +725,16 @@ class BatchDownloader:
 
 
 def main():
+    if len(sys.argv) >= 3 and sys.argv[1] == "--expand":
+        try:
+            with open(sys.argv[2], "r", encoding="utf-8") as f:
+                urls = json.load(f).get("urls", [])
+        except Exception as e:
+            send_event("error", error=f"Geçersiz yapılandırma: {e}")
+            sys.exit(1)
+        send_event("expanded", results=expand_urls(urls))
+        return
+
     try:
         if len(sys.argv) < 2:
             config = json.loads(sys.stdin.read())
