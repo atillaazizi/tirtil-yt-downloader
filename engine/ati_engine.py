@@ -1402,9 +1402,25 @@ class BatchDownloader:
 
     def sync_remove_missing(self):
         """Senkron açıkken: listeden çıkarılan parçaların dosyalarını (ve .lrc'lerini) Çöp'e taşır."""
-        for folder, current in self.synced_lists.items():
+        for folder, sync in self.synced_lists.items():
             st = self._sync_state(folder)
+            current = sync["ids"]
+            # Klasör adı listenin adından gelir: aynı adlı başka bir liste bu klasörü kullanmışsa onun
+            # dosyalarına dokunma. Kimliği olmayan eski kayıtta da bu sefer yalnız kimliği yaz, silme.
+            saved = st.get("list")
+            if saved != sync["list"]:
+                if saved:
+                    log(f"Senkron: '{folder}' klasörü başka bir Spotify listesine ait, hiçbir dosya silinmedi.", "warn")
+                else:
+                    st["list"] = sync["list"]
+                    self._sync_save(folder)
+                continue
             gone = [tid for tid in list(st["tracks"]) if tid not in current]
+            # Liste geçici olarak eksik okunduysa (Spotify hatası vb.) toplu silme yapma
+            if len(gone) > max(5, len(st["tracks"]) // 2):
+                log(f"Senkron: '{folder}' için {len(gone)} parça listeden çıkmış görünüyor; güvenlik için "
+                    f"silinmedi. Gerçekten çıkarıldıysa dosyaları elle silebilirsin.", "warn")
+                continue
             for tid in gone:
                 path = os.path.join(self.item_dir(folder), st["tracks"].pop(tid))
                 for p in (path, os.path.splitext(path)[0] + ".lrc"):
@@ -1857,8 +1873,10 @@ class BatchDownloader:
                     elif r.get("title"):
                         log(f"Liste genişletildi: {r['title']} ({len(r['entries'])} parça)", "success")
                     entries, folder = r["entries"], (r.get("title") or item["folder"])
-                    if r.get("spotify_complete") and folder:
-                        self.synced_lists[folder] = {e.rsplit("/", 1)[-1] for e in entries}
+                    ref = spotify_ref(item["url"])
+                    if r.get("spotify_complete") and folder and ref:
+                        self.synced_lists[folder] = {"list": f"{ref[0]}:{ref[1]}",
+                                                     "ids": {e.rsplit("/", 1)[-1] for e in entries}}
                 for link in entries:
                     if link not in seen:
                         seen.add(link)
