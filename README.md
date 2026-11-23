@@ -3,6 +3,26 @@
 macOS için toplu YouTube ses/video indirici. Link listesini yapıştır, formatı seç, indir.
 İstersen albüm/derleme videolarını parçalara böler (YouTube bölümleri, yoksa sessizlik algılama).
 
+**Desteklenen kaynaklar:** YouTube / YouTube Music, Spotify (parça, albüm, çalma listesi, sanatçı), Bandcamp (parça, albüm),
+SoundCloud (parça, set, kullanıcı) ve yt-dlp'nin desteklediği diğer siteler.
+
+**Spotify nasıl iner?** Spotify sesi DRM korumalıdır; Tırtıl onu kırmaz. Parça bilgisi Spotify'dan, ISRC / yıl /
+parça numarası / plak şirketi Deezer'ın açık API'sinden alınır. Aynı kayıt [spotDL](https://github.com/spotDL/spotify-downloader)'in
+eşleştirme kurallarıyla (ad, sanatçı, süre, albüm, explicit) önce ISRC ile, sonra ad ile YouTube Music'te aranır,
+bulunamazsa normal YouTube'a düşülür. Etiketler ve kare kapak Spotify'dan yazılır. Podcast linkleri desteklenmez.
+
+- **100 parça sınırı:** Spotify'ın herkese açık sayfası listelerin ilk 100 parçasını verir. Tamamı için
+  [developer.spotify.com](https://developer.spotify.com/dashboard)'da ücretsiz bir uygulama oluşturup Client ID / Secret'ı
+  *Gelişmiş* ayarlara gir (Secret macOS Anahtar Zinciri ile şifrelenir).
+- **Senkron:** *Spotify listelerini senkronla* açıkken aynı listeyi tekrar indirdiğinde yalnızca yeni parçalar iner,
+  listeden çıkarılanların dosyaları Çöp'e taşınır. Liste linkini genişletmeden bırak.
+- **Orijinal:** Sesi dönüştürmeden, kaynaktaki kalitesiyle (genelde M4A) kaydeder. YouTube Music Premium hesabı açık
+  tarayıcının cookie'si seçiliyse 256 kbps AAC iner.
+- **.m3u8:** Her liste klasörüne parça sırasıyla çalma listesi dosyası yazılır.
+
+**Şarkı sözleri:** *Şarkı sözlerini ekle* açıkken sözler [LRCLIB](https://lrclib.net)'den bulunur. MP3'e zamanlı (SYLT)
+ve düz sözler gömülür; diğer biçimlerde düz sözler gömülür, zamanlı sözler yanına `.lrc` olarak yazılır.
+
 > [rtrw_/dotu-yt](https://github.com/rtrwcloud/dotu-yt) (MIT) projesinin macOS portu.
 
 ## Kurulum

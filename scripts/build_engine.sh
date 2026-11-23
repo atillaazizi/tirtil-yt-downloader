@@ -14,6 +14,7 @@ rm -rf build/engine build/pyi
   --specpath build/pyi \
   --collect-all yt_dlp \
   --collect-all yt_dlp_ejs \
+  --collect-all mutagen \
   engine/ati_engine.py
 
 echo "Engine hazır: build/engine/ati-engine/ati-engine"

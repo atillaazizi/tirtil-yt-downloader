@@ -169,6 +169,16 @@ select {
   padding: 4px 6px;
 }
 .field.disabled { opacity: 0.4; }
+.field input[type=text], .field input[type=password] {
+  font: inherit;
+  color: var(--text);
+  background: #242428;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 4px 6px;
+  width: 190px;
+  max-width: 100%;
+}
 .check { display: flex; align-items: center; gap: 6px; font-size: 12px; cursor: pointer; }
 .check:has(input:disabled) { opacity: 0.4; }
 

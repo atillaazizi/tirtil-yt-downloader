@@ -25,6 +25,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   const checkPlaylistFolders = $('check-playlist-folders');
   const checkLoudnorm = $('check-loudnorm');
   const checkSponsorblock = $('check-sponsorblock');
+  const checkLyrics = $('check-lyrics');
+  const checkM3u = $('check-m3u');
+  const checkSpotifySync = $('check-spotify-sync');
   const queueList = $('queue-list');
   const retryRow = $('retry-row');
 
@@ -73,7 +76,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     urlCounter.textContent = n;
     const fmt = selectedFormat.toUpperCase();
     const lossy = selectedFormat === 'mp3' || selectedFormat === 'm4a';
-    const detail = selectedFormat === 'mp4' ? 'Video' : lossy ? `${fmt} ${selectBitrate.value} kbps` : fmt;
+    const detail = selectedFormat === 'mp4' ? 'Video' : selectedFormat === 'original' ? 'Orijinal ses'
+      : lossy ? `${fmt} ${selectBitrate.value} kbps` : fmt;
     btnStart.textContent = n ? `${n} link indir · ${detail}` : `İndir · ${detail}`;
   }
 
@@ -110,6 +114,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   checkPlaylistFolders.checked = s.playlist_folders !== false;
   checkLoudnorm.checked = !!s.loudnorm;
   checkSponsorblock.checked = !!s.sponsorblock;
+  checkLyrics.checked = s.lyrics !== false;
+  checkM3u.checked = s.playlist_m3u !== false;
+  checkSpotifySync.checked = !!s.spotify_sync;
+  $('input-spotify-id').value = s.spotify_client_id || '';
+  $('input-spotify-secret').placeholder = s.spotify_has_secret ? 'kayıtlı' : '';
   $('check-ytdlp-auto').checked = s.ytdlp_auto_update !== false;
   setFormat(s.format || 'mp3', false);
 
@@ -131,9 +140,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     const found = (text.match(URL_RE) || []).map(u => u.replace(/[).\]]+$/, ''));
     for (const m of text.matchAll(BARE_YT_RE)) found.push('https://' + m[1]);
     const urls = [...new Set(found)];
-    return youtubeOnly ? urls.filter(u => /^https?:\/\/([\w-]+\.)?(youtube\.com|youtu\.be)\//i.test(u)) : urls;
+    return youtubeOnly ? urls.filter(u => /^https?:\/\/([\w-]+\.)?(youtube\.com|youtu\.be|open\.spotify\.com|bandcamp\.com|soundcloud\.com)\//i.test(u)) : urls;
   }
-  const isPlaylist = (u) => /youtu/.test(u) && /[?&]list=(?!RD)[\w-]+/.test(u);
+  const isPlaylist = (u) => (/youtu/.test(u) && /[?&]list=(?!RD)[\w-]+/.test(u))
+    || /open\.spotify\.com\/(?:intl-[\w-]+\/)?(?:album|playlist|artist)\//.test(u)
+    || /bandcamp\.com\/(?:album\/|music\/?$|$)|^https?:\/\/[\w-]+\.bandcamp\.com\/?$/.test(u)
+    || /soundcloud\.com\/[\w-]+\/?(?:$|[?#]|(?:tracks|albums|sets|popular-tracks)\/?$|sets\/)/.test(u);
+
+  // Senkron açıkken Spotify listeleri link olarak kalır: motor listenin güncel halini kendisi okuyup
+  // listeden çıkan parçaları bulabilsin
+  const expandable = (u) => isPlaylist(u) && !(checkSpotifySync.checked && /open\.spotify\.com/.test(u));
 
   let expanding = false;
   async function expandInList(playlists) {
@@ -155,7 +171,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (r.title) r.entries.forEach(e => playlistFolderOf.set(e, r.title));
       if (idx >= 0) lines.splice(idx, 1, ...fresh);
       else lines.push(...fresh);
-      if (r.title) appendLog(`Çalma listesi genişletildi: ${r.title} (${r.entries.length} video)`, 'success');
+      if (r.title) appendLog(`Çalma listesi genişletildi: ${r.title} (${r.entries.length} parça)`, 'success');
     }
     urlInput.value = lines.filter(l => l.trim()).join('\n');
     refresh();
@@ -170,7 +186,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       urlInput.value = (cur ? cur + '\n' : '') + fresh.join('\n');
       refresh();
       appendLog(`${source}: ${fresh.length} link eklendi.`, 'success');
-      const playlists = fresh.filter(isPlaylist);
+      const playlists = fresh.filter(expandable);
       if (checkExpand.checked && playlists.length) expandInList(playlists);
     }
     return fresh.length;
@@ -188,7 +204,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
 
-  // Panodan otomatik ekle: pano değiştiğinde YouTube linklerini yakalar
+  // Panodan otomatik ekle: pano değiştiğinde YouTube/Spotify/Bandcamp/SoundCloud linklerini yakalar
   let lastClip = null;
   let clipTimer = null;
   async function pollClipboard() {
@@ -219,7 +235,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   checkExpand.addEventListener('change', () => {
     api.saveSettings({ expand_playlists: checkExpand.checked });
     if (checkExpand.checked) {
-      const playlists = getUrls().filter(isPlaylist);
+      const playlists = getUrls().filter(expandable);
       if (playlists.length) expandInList(playlists);
     }
   });
@@ -287,6 +303,18 @@ document.addEventListener('DOMContentLoaded', async () => {
   bindCheck(checkPlaylistFolders, 'playlist_folders');
   bindCheck(checkLoudnorm, 'loudnorm');
   bindCheck(checkSponsorblock, 'sponsorblock');
+  bindCheck(checkLyrics, 'lyrics');
+  bindCheck(checkM3u, 'playlist_m3u');
+  bindCheck(checkSpotifySync, 'spotify_sync');
+  $('btn-spotify-save').addEventListener('click', async () => {
+    const id = $('input-spotify-id').value.trim();
+    const secretInput = $('input-spotify-secret');
+    const res = await api.setSpotifyCredentials({ id, secret: secretInput.value.trim() });
+    secretInput.value = '';
+    if (res?.error) return appendLog(`Spotify anahtarı kaydedilemedi: ${res.error}`, 'error');
+    secretInput.placeholder = res.hasSecret ? 'kayıtlı' : '';
+    appendLog(res.hasSecret && id ? 'Spotify API anahtarı kaydedildi.' : 'Spotify API anahtarı silindi.', 'success');
+  });
   bindCheck($('check-ytdlp-auto'), 'ytdlp_auto_update');
 
   $('btn-clear-archive').addEventListener('click', async () => {
@@ -379,7 +407,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   btnStart.addEventListener('click', async () => {
     const urls = getUrls();
     if (!urls.length) {
-      appendLog('En az bir YouTube linki gir.', 'warn');
+      appendLog('En az bir YouTube, Spotify, Bandcamp veya SoundCloud linki gir.', 'warn');
       return urlInput.focus();
     }
     isDownloading = true;
@@ -407,7 +435,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       resolution: selectResolution.value,
       skip_downloaded: checkSkipDownloaded.checked,
       loudnorm: checkLoudnorm.checked && selectedFormat !== 'mp4',
-      sponsorblock: checkSponsorblock.checked && selectedFormat !== 'mp4'
+      sponsorblock: checkSponsorblock.checked && selectedFormat !== 'mp4',
+      lyrics: checkLyrics.checked && selectedFormat !== 'mp4',
+      playlist_m3u: checkM3u.checked,
+      spotify_sync: checkSpotifySync.checked
     });
     if (res?.error) {
       appendLog(res.error, 'error');

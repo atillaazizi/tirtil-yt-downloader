@@ -3,6 +3,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('atiAPI', {
   getInitialState: () => ipcRenderer.invoke('get-initial-state'),
   saveSettings: (settings) => ipcRenderer.invoke('save-settings', settings),
+  setSpotifyCredentials: (creds) => ipcRenderer.invoke('set-spotify-credentials', creds),
   pickFolder: (defaultPath) => ipcRenderer.invoke('pick-folder', defaultPath),
   pickTxtFile: () => ipcRenderer.invoke('pick-txt-file'),
   openFolder: (targetPath) => ipcRenderer.invoke('open-folder', targetPath),

@@ -26,9 +26,9 @@
         </div>
       </div>
       <textarea id="url-input" spellcheck="false"
-        placeholder="YouTube linklerini yapıştır (her satıra bir link)&#10;https://www.youtube.com/watch?v=...&#10;https://youtu.be/..."></textarea>
+        placeholder="YouTube, Spotify, Bandcamp veya SoundCloud linklerini yapıştır (her satıra bir link)&#10;https://www.youtube.com/watch?v=...&#10;https://open.spotify.com/track/... (albüm, liste ve sanatçı da olur)"></textarea>
       <div class="row wrap">
-        <label class="check" title="Bir YouTube linki kopyaladığında listeye kendiliğinden eklenir">
+        <label class="check" title="YouTube, Spotify, Bandcamp veya SoundCloud linki kopyaladığında listeye kendiliğinden eklenir">
           <input type="checkbox" id="check-auto-clip"> Panodan otomatik ekle
         </label>
         <label class="check" title="Çalma listesi linkini içindeki videoların tek tek linklerine açar">
@@ -48,6 +48,7 @@
       <div class="segmented" id="format-pill-group">
         <button data-format="mp3" class="active">MP3</button>
         <button data-format="m4a">M4A</button>
+        <button data-format="original" title="Sesi dönüştürmeden, kaynaktaki kalitesiyle kaydeder (genelde M4A). Daha küçük dosya, kalite kaybı yok">Orijinal</button>
         <button data-format="wav">WAV</button>
         <button data-format="flac">FLAC</button>
         <button data-format="mp4">MP4 Video</button>
@@ -123,7 +124,26 @@
           <label class="check" title="SponsorBlock verisine göre sponsor, giriş/kapanış ve müzik dışı kısımları keser (yalnızca ses)">
             <input type="checkbox" id="check-sponsorblock"> Sponsor ve müzik dışı kısımları kes
           </label>
+          <label class="check" title="LRCLIB'den şarkı sözlerini bulup dosyaya gömer. MP3'te zamanlı sözler de gömülür; diğer biçimlerde yanına .lrc yazılır (yalnızca ses)">
+            <input type="checkbox" id="check-lyrics"> Şarkı sözlerini ekle
+          </label>
+          <label class="check" title="Her liste klasörüne parça sırasıyla bir .m3u8 çalma listesi dosyası yazar">
+            <input type="checkbox" id="check-m3u" checked> Liste için .m3u8 oluştur
+          </label>
+          <label class="check" title="Spotify listesini yeniden indirdiğinde yalnızca yeni parçalar iner; listeden çıkarılan parçaların dosyaları Çöp'e taşınır. Liste linkini genişletmeden bırak">
+            <input type="checkbox" id="check-spotify-sync"> Spotify listelerini senkronla
+          </label>
         </div>
+        <div class="row wrap options">
+          <label class="field">Spotify Client ID
+            <input type="text" id="input-spotify-id" spellcheck="false" autocomplete="off">
+          </label>
+          <label class="field">Secret
+            <input type="password" id="input-spotify-secret" autocomplete="off">
+          </label>
+          <button class="btn" id="btn-spotify-save">Kaydet</button>
+        </div>
+        <p class="hint">İsteğe bağlı. developer.spotify.com'da ücretsiz bir uygulama oluşturup anahtarını girersen Spotify listeleri 100 parça sınırı olmadan gelir. Secret macOS Anahtar Zinciri ile şifrelenip saklanır. Secret'ı boş bırakırsan kayıtlı olan korunur; Client ID'yi silip kaydedersen ikisi de silinir.</p>
         <div class="row wrap options">
           <span class="small" id="ytdlp-version">yt-dlp: …</span>
           <button class="btn" id="btn-ytdlp-update">yt-dlp'yi Güncelle</button>
@@ -160,7 +180,7 @@
     <form method="dialog" class="dialog-body">
       <h2>Çoklu URL Ekle</h2>
       <p class="hint">İstediğin kadar link yapıştır. Boşluk, virgül ya da satırla ayrılabilir; metin içindeki linkler de bulunur.</p>
-      <textarea id="multi-url-input" spellcheck="false" placeholder="https://youtu.be/... https://www.youtube.com/watch?v=..."></textarea>
+      <textarea id="multi-url-input" spellcheck="false" placeholder="https://youtu.be/... https://www.youtube.com/watch?v=... https://open.spotify.com/track/..."></textarea>
       <div class="row between">
         <span class="small" id="multi-url-count">0 link bulundu</span>
         <div class="row">

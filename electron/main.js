@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell, Menu, clipboard, Notification } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, Menu, clipboard, Notification, safeStorage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
@@ -41,10 +41,48 @@ function buildEngineEnv() {
   env.ATI_FFMPEG_DIR = app.isPackaged
     ? path.join(res, 'ffmpeg')
     : path.dirname(require('ffmpeg-static'));
+  // İsteğe bağlı Spotify API anahtarı: dosyaya değil ortam değişkenine verilir
+  const sp = getSpotifyCredentials();
+  if (sp) {
+    env.ATI_SPOTIFY_ID = sp.id;
+    env.ATI_SPOTIFY_SECRET = sp.secret;
+  }
   return env;
 }
 
 const YTDLP_DIR = path.join(APP_DATA_DIR, 'yt-dlp');
+
+// Spotify secret, macOS Anahtar Zinciri'ne bağlı safeStorage ile şifrelenip settings.json'da saklanır.
+function getSpotifyCredentials() {
+  const s = loadSettings();
+  if (!s.spotify_client_id || !s.spotify_secret_enc) return null;
+  try {
+    if (!safeStorage.isEncryptionAvailable()) return null;
+    const secret = safeStorage.decryptString(Buffer.from(s.spotify_secret_enc, 'base64'));
+    return secret ? { id: s.spotify_client_id, secret } : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function setSpotifyCredentials({ id, secret } = {}) {
+  id = typeof id === 'string' ? id.trim() : '';
+  secret = typeof secret === 'string' ? secret.trim() : '';
+  if (!id) {
+    saveSettings({ spotify_client_id: '', spotify_secret_enc: '' });
+    return { hasSecret: false };
+  }
+  if (!/^[A-Za-z0-9]{16,64}$/.test(id) || (secret && !/^[A-Za-z0-9]{16,64}$/.test(secret))) {
+    return { error: 'Client ID ve Secret yalnız harf ve rakamdan oluşur.' };
+  }
+  const update = { spotify_client_id: id };
+  if (secret) {
+    if (!safeStorage.isEncryptionAvailable()) return { error: 'macOS şifreleme kullanılamıyor.' };
+    update.spotify_secret_enc = safeStorage.encryptString(secret).toString('base64');
+  }
+  saveSettings(update);
+  return { hasSecret: !!loadSettings().spotify_secret_enc };
+}
 
 function loadSettings() {
   if (fs.existsSync(SETTINGS_FILE)) {
@@ -167,6 +205,9 @@ ipcMain.handle('get-initial-state', () => {
   if (!settings.download_folder) {
     settings.download_folder = defaultDownloadFolder;
   }
+  // Şifreli secret renderer'a gönderilmez; yalnızca kayıtlı olup olmadığı
+  settings.spotify_has_secret = !!settings.spotify_secret_enc;
+  delete settings.spotify_secret_enc;
   return {
     settings,
     defaultDownloadFolder,
@@ -175,8 +216,15 @@ ipcMain.handle('get-initial-state', () => {
 });
 
 ipcMain.handle('save-settings', (_e, settings) => {
+  // Secret yalnızca set-spotify-credentials üzerinden yazılır
+  if (settings && typeof settings === 'object') {
+    delete settings.spotify_secret_enc;
+    delete settings.spotify_has_secret;
+  }
   return saveSettings(settings);
 });
+
+ipcMain.handle('set-spotify-credentials', (_e, creds) => setSpotifyCredentials(creds));
 
 ipcMain.handle('pick-folder', async (_e, defaultPath) => {
   const result = await dialog.showOpenDialog(mainWindow, {

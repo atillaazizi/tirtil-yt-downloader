@@ -1,0 +1,72 @@
+# spotDL (github.com/spotDL/spotify-downloader) takibi.
+# Tırtıl'ın Spotify akışı spotDL'in eşleştirme ve etiket kurallarını kullanır. Bu iş haftada bir,
+# .github/spotdl-upstream.txt dosyasındaki son aktarılan commit'ten bu yana spotDL'de ilgili dosyalara
+# dokunan commit'leri bulur ve tek bir issue açar (açık issue varsa onu günceller).
+# Değişiklikler aktarılınca spotdl-upstream.txt yeni commit'e güncellenir ve issue kapatılır.
+name: spotDL takibi
+
+on:
+  schedule:
+    - cron: "0 7 * * 1" # her pazartesi 07:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: spotDL değişikliklerini kontrol et
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPSTREAM: spotDL/spotify-downloader
+          LABEL: spotdl-upstream
+        run: |
+          set -euo pipefail
+          base=$(tr -d '[:space:]' < .github/spotdl-upstream.txt)
+          branch=$(gh api "repos/$UPSTREAM" --jq .default_branch)
+          gh api "repos/$UPSTREAM/compare/$base...$branch" > compare.json
+
+          # Tırtıl'ı ilgilendiren dosyalar (DRM/indirici sağlayıcılar ve söz kazıyıcılar bilerek dışarıda)
+          focus='^spotdl/(utils/(matching|metadata|search|m3u|formatter|lrc)\.py|providers/audio/(base|ytmusic|youtube)\.py|providers/lyrics/(base|synced)\.py|types/song\.py|download/downloader\.py)$'
+
+          files=$(jq -r --arg re "$focus" '[.files[]?.filename | select(test($re))] | unique | .[]' compare.json)
+          if [ -z "$files" ]; then
+            echo "İlgili değişiklik yok."
+            exit 0
+          fi
+
+          head=$(jq -r '.commits[-1].sha' compare.json)
+          total=$(jq -r '.total_commits' compare.json)
+          release=$(gh api "repos/$UPSTREAM/releases/latest" --jq '"\(.tag_name) (\(.published_at[:10]))"' 2>/dev/null || echo "-")
+
+          {
+            echo "spotDL'de son aktarılan commit'ten (\`${base:0:7}\`) bu yana Tırtıl'ı ilgilendiren değişiklik var."
+            echo
+            echo "- Toplam yeni commit: $total"
+            echo "- Son sürüm: $release"
+            echo "- Karşılaştırma: https://github.com/$UPSTREAM/compare/${base:0:12}...${head:0:12}"
+            echo
+            echo "### Değişen ilgili dosyalar"
+            for f in $files; do echo "- \`$f\`"; done
+            echo
+            echo "### Commit'ler"
+            jq -r '.commits[] | "- [`\(.sha[:7])`](\(.html_url)) \(.commit.message | split("\n")[0]) — \(.commit.author.date[:10])"' compare.json | tail -n 60
+            echo
+            echo "---"
+            echo "Aktarma: \`engine/ati_engine.py\` (Müzik servisleri bölümü). DRM kıran sağlayıcılar, Genius/AZLyrics/Musixmatch kazıyıcıları ve slider.kz aktarılmaz."
+            echo "Bitince \`.github/spotdl-upstream.txt\` dosyasını \`$head\` yap ve bu issue'yu kapat."
+          } > body.md
+
+          gh label create "$LABEL" --color 1DB954 --description "spotDL upstream değişiklikleri" 2>/dev/null || true
+          num=$(gh issue list --label "$LABEL" --state open --json number --jq '.[0].number // empty')
+          title="spotDL güncellemesi: ${base:0:7}..${head:0:7} ($total commit)"
+          if [ -n "$num" ]; then
+            gh issue edit "$num" --title "$title" --body-file body.md
+          else
+            gh issue create --title "$title" --label "$LABEL" --body-file body.md
+          fi
