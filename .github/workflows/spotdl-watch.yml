@@ -13,11 +13,19 @@ on:
 permissions:
   contents: read
   issues: write
+  actions: write # yalnız bu iş akışını etkin tutmak için
 
 jobs:
   check:
     runs-on: ubuntu-latest
     steps:
+      # GitHub, repoda 60 gün hareket olmazsa zamanlanmış iş akışlarını kapatır. Her çalışmada bu iş
+      # akışını API ile yeniden "etkin" işaretlemek sayacı sıfırlar (commit gerekmez).
+      - name: Zamanlamayı etkin tut
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X PUT "repos/$GITHUB_REPOSITORY/actions/workflows/spotdl-watch.yml/enable"
+
       - uses: actions/checkout@v4
 
       - name: spotDL değişikliklerini kontrol et
