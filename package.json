@@ -7,7 +7,8 @@
   "scripts": {
     "start": "electron .",
     "build:engine": "./scripts/build_engine.sh",
-    "build": "npm run build:engine && electron-builder --mac"
+    "build": "npm run build:engine && electron-builder --mac --arm64",
+    "build:x64": "npm run build:engine && electron-builder --mac --x64"
   },
   "author": "ATi__ (atillaazizi)",
   "license": "MIT",
@@ -47,12 +48,7 @@
       "category": "public.app-category.music",
       "icon": "assets/icon.icns",
       "target": [
-        {
-          "target": "dmg",
-          "arch": [
-            "arm64"
-          ]
-        }
+        "dmg"
       ],
       "identity": null,
       "darkModeSupport": true,

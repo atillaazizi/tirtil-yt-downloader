@@ -40,13 +40,13 @@ Belirli bir sürüm için: `... | bash -s -- 1.2.1`. Terminalden kurulumda macOS
 
 ## Kullanım (hazır uygulama)
 
-1. `Tirtil-x.y.z-arm64.dmg` ([Releases](https://github.com/atillaazizi/tirtil-yt-downloader/releases/latest)) dosyasını aç, uygulamayı **Applications** klasörüne sürükle.
+1. Apple Silicon için `Tirtil-x.y.z-arm64.dmg`, Intel için `Tirtil-x.y.z-x64.dmg` ([Releases](https://github.com/atillaazizi/tirtil-yt-downloader/releases/latest)) dosyasını aç, uygulamayı **Applications** klasörüne sürükle.
 2. İlk açılışta macOS "geliştirici doğrulanamadı" uyarısı verir (uygulama Apple imzalı değil):
    - **Sistem Ayarları → Gizlilik ve Güvenlik** → en altta **"Yine de Aç"**, ya da
    - Terminal'de: `xattr -dr com.apple.quarantine "/Applications/Tırtıl.app"`
 3. Linkleri yapıştır → format seç → **İndir**. Dosyalar `İndirilenler/Tırtıl_Downloads` klasörüne iner.
 
-Ek kurulum gerekmez: FFmpeg, Python motoru ve Node uygulamanın içinde. Apple Silicon (M1 ve sonrası), macOS 12+.
+Ek kurulum gerekmez: FFmpeg, Python motoru ve Node uygulamanın içinde. Apple Silicon ve Intel Mac, macOS 12+.
 
 **Not:** YouTube "bot" engeli verirse *Gelişmiş → Tarayıcı cookie* ile YouTube'a giriş yapılmış tarayıcıyı seç.
 Chrome/Brave/Edge'de macOS Anahtar Zinciri izin sorar — "İzin Ver". Safari için Tam Disk Erişimi gerekir.
@@ -63,10 +63,16 @@ Böylece YouTube değişikliklerine karşı uygulamanın yeniden build edilmesi 
 
 ## Yeni sürüm yayınlama
 
-1. `package.json` içindeki `version` değerini artır (ör. `1.2.1`).
-2. `npm run build` → `dist/Tirtil-<sürüm>-arm64.dmg`
-3. `node scripts/sign_release.js dist/Tirtil-<sürüm>-arm64.dmg` → `.sig` (sürüm + mimari + SHA-256 içeren imzalı manifest)
-4. `gh release create v<sürüm> dist/Tirtil-<sürüm>-arm64.dmg dist/Tirtil-<sürüm>-arm64.dmg.sig --title "Tırtıl v<sürüm>" --notes "..."`
+1. `package.json` içindeki `version` değerini artır (ör. `1.2.1`), commit'le ve push et.
+2. Notlarıyla birlikte etiketi push et:
+   `git tag -a v<sürüm> -m "- yenilik ..." && git push origin v<sürüm>`
+3. GitHub Actions (`.github/workflows/release.yml`) arm64 ve Intel DMG'lerini kendi Mac'lerinde derler,
+   mimarileri doğrular, `.sig` imzalarını atar (sürüm + mimari + SHA-256 içeren imzalı manifest) ve
+   etiket mesajını not olarak kullanıp GitHub sürümünü oluşturur.
+
+İmza anahtarı GitHub'da `release` ortamının `TIRTIL_SIGNING_KEY` secret'ında; ortam yalnız `v*` etiketlerine açık.
+Elle yayınlamak gerekirse: `npm run build` (arm64) / `npm run build:x64`, ardından
+`node scripts/sign_release.js dist/Tirtil-<sürüm>-<arch>.dmg` ve `gh release create ...`.
 
 Etiket `v` + `package.json` sürümüyle aynı olmalı; uygulamalar bu sürümü görüp güncelleme önerir.
 Uygulama yalnızca `~/.config/tirtil/update-signing-key.pem` ile imzalanmış DMG'leri kurar — bu anahtarı yedekle,

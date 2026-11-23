@@ -1,5 +1,5 @@
 #!/bin/bash
-# Tırtıl YT Downloader — terminalden kurulum (macOS, Apple Silicon)
+# Tırtıl YT Downloader — terminalden kurulum (macOS, Apple Silicon ve Intel)
 #
 #   curl -fsSL https://raw.githubusercontent.com/atillaazizi/tirtil-yt-downloader/main/install.sh | bash
 #
@@ -15,8 +15,14 @@ say()  { printf '\033[1;32m==>\033[0m %s\n' "$*"; }
 die()  { printf '\033[1;31mHata:\033[0m %s\n' "$*" >&2; exit 1; }
 
 [ "$(uname -s)" = "Darwin" ] || die "Tırtıl yalnızca macOS'ta çalışır."
-ARCH="$(uname -m)"
-[ "$ARCH" = "arm64" ] || die "Şu an yalnızca Apple Silicon (arm64) destekleniyor; bu Mac: $ARCH"
+# Rosetta altında çalışan terminal de "x86_64" der; donanım Apple Silicon ise arm64 sürümü kurulur.
+if [ "$(uname -m)" = "arm64" ] || [ "$(sysctl -in hw.optional.arm64 2>/dev/null)" = "1" ]; then
+  ARCH="arm64"
+elif [ "$(uname -m)" = "x86_64" ]; then
+  ARCH="x64"
+else
+  die "Desteklenmeyen işlemci: $(uname -m)"
+fi
 OS_MAJOR="$(sw_vers -productVersion | cut -d. -f1)"
 [ "$OS_MAJOR" -ge 12 ] || die "macOS 12 veya üzeri gerekli."
 

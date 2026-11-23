@@ -1,0 +1,141 @@
+# Sürüm derleme: "v1.2.3" etiketi push edilince Apple Silicon ve Intel DMG'leri kendi Mac'lerinde derlenir,
+# güncelleme imzası (.sig) atılır ve GitHub sürümü oluşturulur.
+# Sürüm notları annotated etiketin mesajından alınır:  git tag -a v1.2.3 -m "- yenilik ..."
+# Elle çalıştırma (Actions > Sürüm derle > Run workflow) yalnız derler, imzalamaz ve yayınlamaz (deneme için).
+#
+# İmza anahtarı "release" ortamının TIRTIL_SIGNING_KEY secret'ında. O ortam yalnız v* etiketlerine açık,
+# anahtarı sadece aşağıdaki "release" işi görür; derleme işleri anahtara erişemez.
+name: Sürüm derle
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-15
+            machine: arm64
+          - arch: x64
+            runner: macos-15-intel
+            machine: x86_64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Etiket ve package.json sürümü aynı mı
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          want="${GITHUB_REF_NAME#v}"
+          have=$(node -p 'require("./package.json").version')
+          [ "$want" = "$have" ] || { echo "::error::Etiket $GITHUB_REF_NAME ama package.json $have"; exit 1; }
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Bağımlılıklar
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install -q --upgrade pip
+          .venv/bin/pip install -q -r requirements.txt
+          npm install --no-audit --no-fund
+
+      - name: Derle
+        run: npm run build:engine && npx electron-builder --mac --${{ matrix.arch }}
+
+      - name: Mimari kontrolü
+        env:
+          MACHINE: ${{ matrix.machine }}
+        run: |
+          app=$(ls -d dist/mac*/Tırtıl.app)
+          for f in "$app/Contents/MacOS/Tırtıl" "$app/Contents/Resources/engine/ati-engine" "$app/Contents/Resources/ffmpeg/ffmpeg"; do
+            lipo -archs "$f" | tee /dev/stderr | grep -qw "$MACHINE" || { echo "::error::$f $MACHINE değil"; exit 1; }
+          done
+          "$app/Contents/Resources/engine/ati-engine" --ytdlp-info
+          codesign --verify --deep --strict "$app"
+          ls -l dist/*.dmg
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dmg-${{ matrix.arch }}
+          path: dist/Tirtil-*-${{ matrix.arch }}.dmg
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: dmg-*
+          path: dist
+          merge-multiple: true
+
+      - name: Güncelleme imzası
+        env:
+          SIGNING_KEY: ${{ secrets.TIRTIL_SIGNING_KEY }}
+        run: |
+          [ -n "$SIGNING_KEY" ] || { echo "::error::TIRTIL_SIGNING_KEY secret'ı yok"; exit 1; }
+          umask 077
+          key="$RUNNER_TEMP/signing-key.pem"
+          printf '%s\n' "$SIGNING_KEY" > "$key"
+          for dmg in dist/Tirtil-*.dmg; do
+            TIRTIL_SIGNING_KEY="$key" node scripts/sign_release.js "$dmg"
+          done
+          rm -f "$key"
+          ls -l dist
+
+      - name: İmzaları uygulamadaki açık anahtarla doğrula
+        run: |
+          node - dist/Tirtil-*.dmg <<'EOF'
+          const fs = require('fs'), crypto = require('crypto');
+          const src = fs.readFileSync('electron/updater.js', 'utf8');
+          const pub = crypto.createPublicKey(src.match(/-----BEGIN PUBLIC KEY-----[\s\S]+?-----END PUBLIC KEY-----/)[0]);
+          for (const dmg of process.argv.slice(2)) {
+            const m = JSON.parse(fs.readFileSync(dmg + '.sig', 'utf8'));
+            const payload = `tirtil-update:v1\n${m.version}\n${m.arch}\n${m.sha256}`;
+            const sha = crypto.createHash('sha256').update(fs.readFileSync(dmg)).digest('hex');
+            if (!crypto.verify(null, Buffer.from(payload), pub, Buffer.from(m.signature, 'base64')) || sha !== m.sha256) {
+              console.error(`::error::${dmg} imzası uygulamanın açık anahtarıyla doğrulanmadı`);
+              process.exit(1);
+            }
+            console.log(`OK ${dmg} (${m.arch})`);
+          }
+          EOF
+
+      - name: GitHub sürümü
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="$GITHUB_REF_NAME"
+          read -r type sha < <(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" --jq '"\(.object.type) \(.object.sha)"')
+          notes=()
+          if [ "$type" = "tag" ]; then
+            gh api "repos/$GITHUB_REPOSITORY/git/tags/$sha" --jq .message | sed '/-----BEGIN PGP SIGNATURE-----/,$d' > notes.md
+          fi
+          if [ -s notes.md ]; then notes=(--notes-file notes.md); else notes=(--generate-notes); fi
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" dist/Tirtil-* --clobber
+          else
+            gh release create "$tag" dist/Tirtil-* --title "Tırtıl $tag" "${notes[@]}"
+          fi
