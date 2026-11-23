@@ -23,6 +23,9 @@ bulunamazsa normal YouTube'a düşülür. Etiketler ve kare kapak Spotify'dan ya
 **Şarkı sözleri:** *Şarkı sözlerini ekle* açıkken sözler [LRCLIB](https://lrclib.net)'den bulunur. MP3'e zamanlı (SYLT)
 ve düz sözler gömülür; diğer biçimlerde düz sözler gömülür, zamanlı sözler yanına `.lrc` olarak yazılır.
 
+**Albüm kapağı:** YouTube'dan ses indirirken şarkı Deezer'da bulunursa (sanatçı, ad ve süre tutmalı) video küçük resmi
+yerine gerçek albüm kapağı (1000×1000) gömülür. Müzik olmayan videolarda ya da eşleşme yoksa küçük resim kare kırpılır.
+
 > [rtrw_/dotu-yt](https://github.com/rtrwcloud/dotu-yt) (MIT) projesinin macOS portu.
 
 ## Kurulum

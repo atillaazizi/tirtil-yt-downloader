@@ -776,21 +776,73 @@ def spotify_api_expand(kind, sid):
 
 # Deezer: ISRC, yayın tarihi, parça/disk numarası, albüm sanatçısı ------------
 
+def _fold(s):
+    """Karşılaştırma için: küçük harf, aksansız, Türkçe ı/İ -> i ("Sımarık" = "Şımarık")."""
+    return _slug((s or "").replace("ı", "i").replace("İ", "i"))
+
+
+def deezer_find(artist, title, duration, tolerance=4, exact_tolerance=0):
+    """Deezer'da ad ve sanatçısı geçen, süresi en yakın parça (süre farkı <= tolerance sn). Yoksa None.
+    exact_tolerance: adı ve sanatçısı birebir aynı olan sonuçta izin verilen daha geniş süre farkı
+    (klipler albüm sürümünden uzun olur)."""
+    core = _core_title(title)
+    core_n, artist_n = _fold(core), _fold(artist)
+    if not core_n:
+        return None
+    res = _http_json("https://api.deezer.com/search", {"q": f"{artist} {core}".strip(), "limit": 10})
+    best, best_diff, loose, loose_diff = None, None, None, None
+    for t in res.get("data") or []:
+        t_title, t_artist = _fold(t.get("title")), _fold((t.get("artist") or {}).get("name"))
+        if core_n not in t_title or (artist_n and artist_n not in t_artist):
+            continue
+        diff = abs((t.get("duration") or 0) - duration) if duration else 0
+        if diff <= tolerance:
+            if best_diff is None or diff < best_diff:
+                best, best_diff = t, diff
+        elif diff <= exact_tolerance and _fold(_core_title(t.get("title"))) == core_n and t_artist == artist_n:
+            if loose_diff is None or diff < loose_diff:
+                loose, loose_diff = t, diff
+    return best or loose
+
+
+_YT_TITLE_NOISE = re.compile(
+    r"\s*[\(\[][^\)\]]*\b(official|video|audio|lyrics?|visuali[sz]er|music|clip|hd|4k|remaster(ed)?|"
+    r"klip|resmi|şarkı sözleri)\b[^\)\]]*[\)\]]|\s+(ft|feat|featuring)\.?\s.*$", re.I)
+
+
+def youtube_album_cover(info):
+    """YouTube'dan inen bir şarkı için Deezer'daki albüm kapağı (1000x1000). Müzik değilse ya da emin
+    olunamazsa None: o zaman video küçük resmi kullanılır.
+    Önce yt-dlp'nin müzik bilgisi (YouTube Music / "Topic" kanalları, açıklamadaki "Bu videodaki müzik"),
+    yoksa "Sanatçı - Parça" biçimindeki başlık denenir; ikincisinde süre daha sıkı tutulur."""
+    duration = info.get("duration") or 0
+    if not duration or duration > 20 * 60:
+        return None
+    tries = []
+    artist = info.get("artist") or ", ".join(info.get("artists") or []) or ""
+    if info.get("track") and artist:
+        tries.append((_split_artists(artist)[0], info["track"], 5, 0))
+    m = re.match(r"^\s*(.+?)\s+[-–—]\s+(.+)$", info.get("title") or "")
+    if m:
+        tries.append((_split_artists(m.group(1))[0], _YT_TITLE_NOISE.sub("", m.group(2)).strip(), 3, 120))
+    for a, t, tol, exact_tol in tries:
+        try:
+            hit = deezer_find(a, t, duration, tol, exact_tol)
+        except Exception:
+            write_persistent_log(traceback.format_exc())
+            return None
+        album = (hit or {}).get("album") or {}
+        url = album.get("cover_xl") or album.get("cover_big")
+        if url and "/images/cover//" not in url:  # Deezer kapaksız albümde boş yol döndürür
+            return {"url": url, "album": album.get("title") or ""}
+    return None
+
+
 def deezer_enrich(meta):
     """Deezer'ın açık arama API'siyle meta'yı tamamlar (yerinde). Bulamazsa sessizce geçer."""
     try:
         artist = (meta.get("artists") or [""])[0]
-        core = _core_title(meta["title"])
-        res = _http_json("https://api.deezer.com/search", {"q": f"{artist} {core}", "limit": 10})
-        want = meta.get("duration") or 0
-        core_n, artist_n = _norm(core), _norm(artist)
-        best, best_diff = None, None
-        for t in res.get("data") or []:
-            if core_n not in _norm(t.get("title")) or (artist_n and artist_n not in _norm((t.get("artist") or {}).get("name"))):
-                continue
-            diff = abs((t.get("duration") or 0) - want) if want else 0
-            if diff <= 4 and (best_diff is None or diff < best_diff):
-                best, best_diff = t, diff
+        best = deezer_find(artist, meta["title"], meta.get("duration") or 0)
         if not best:
             return meta
         meta["isrc"] = best.get("isrc") or meta.get("isrc", "")
@@ -1651,6 +1703,12 @@ class BatchDownloader:
                     info = ydl.extract_info(dl_url, download=False)
                     if info and sp_meta:
                         apply_spotify_meta(info, sp_meta)
+                    elif info and self.embed_meta and self.format_choice not in ("mp4", "wav"):
+                        cover = youtube_album_cover(info)
+                        if cover:
+                            info["thumbnails"] = [{"url": cover["url"], "id": "deezer"}]
+                            info["thumbnail"] = cover["url"]
+                            log(f"[{idx}/{total}] Albüm kapağı bulundu: {cover['album']}", "info")
                     # Arşivdeki videolar için yt-dlp bilgi döndürmez (None)
                     title = info.get("title", f"audio_{idx}") if info else url
                     send_event("item_start", index=idx, total=total, title=title)
